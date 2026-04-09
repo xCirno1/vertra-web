@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  /* Mapping your custom variables to Tailwind utilities */
+  --font-sans: 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+
+  /* Vertra color tokens */
+  --color-vertra-bg: #0a0a0c;
+  --color-vertra-surface: #12121a;
+  --color-vertra-surface-alt: #1a1a24;
+  --color-vertra-border: #2a2a3e;
+  --color-vertra-cyan: #1dd4f6;
+  --color-vertra-teal: #8ecfbe;
+  --color-vertra-text: #e8e8f0;
+  --color-vertra-text-dim: #8a8a9e;
+  --color-vertra-success: #51cf66;
+  --color-vertra-error: #ff6b6b;
+  --color-vertra-lime: #c5f135;
+  --color-vertra-slate: #4a4a5a;
+  --color-vertra-obsidian: #07070a;
+
+  /* Legacy aliases */
+  --color-brand-cyan: #1dd4f6;
+  --color-panel-bg: #12121a;
+  --color-panel-border: #2a2a3e;
+
+  /* Custom Animation */
+  --animate-glow: glow-pulse 2s ease-in-out infinite;
+
+  @keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(29, 212, 246, 0.4); }
+    50% { box-shadow: 0 0 14px rgba(29, 212, 246, 0.75); }
+  }
+}
+
+/* Base resets and global styles */
+@layer base {
+  *, ::after, ::before {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body, #__next {
+    width: 100%;
+    height: 100%;
+    background-color: #0a0a0c;
+    color: #e8e8f0;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(circle at 12% 12%, rgba(29, 212, 246, 0.08), transparent 40%),
+      radial-gradient(circle at 88% 78%, rgba(142, 207, 190, 0.08), transparent 48%);
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* Custom UI Utilities */
+
+/* Standard CSS overrides */
+@layer utilities {
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #12121a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a3e;
+    border-radius: 4px;
+    &:hover { background: #3a3a4e; }
+  }
+}
+
+/*
+Source - https://stackoverflow.com/a/14205976
+Posted by Fareed Alnamrouti, modified by community. See post 'Timeline' for change history
+Retrieved 2026-04-08, License - CC BY-SA 4.0
+*/
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active{
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: #ffffff;
+    transition: background-color 5000s ease-in-out 0s;
+    box-shadow: inset 0 0 20px 20px #23232329;
+}
