@@ -62,15 +62,21 @@ export default function EditorPage() {
   const {
     engineState,
     engineError: vertraEngineError,
+    engineMode,
+    engineSelectedObject,
     play: playEngine,
     stop: stopEngine,
     saveSceneVtr,
     loadSceneVtr,
+    toggleEditorMode,
+    sendEditorEvent,
+    applyTransformToEngine,
   } = useVertraEngine();
 
   const viewportRef = useRef<ViewportHandle>(null);
   const didLogEngineLoading = useRef(false);
   const didLogEngineReady = useRef(false);
+  const hasAutoStartedEngine = useRef(false);
 
   const [isProjectLoading, setIsProjectLoading] = useState(true);
   const [logs, setLogs] = useState<string[]>(['[INFO] Studio boot sequence started']);
@@ -177,6 +183,16 @@ export default function EditorPage() {
       // Only log stop message after it was running (not on first render)
     }
   }, [appendLog, engineState, vertraEngineError]);
+
+  useEffect(() => {
+    if (isProjectLoading || !isReady || engineState !== 'idle' || hasAutoStartedEngine.current) {
+      return;
+    }
+
+    hasAutoStartedEngine.current = true;
+    appendLog('INFO', 'Starting Vertra Engine in editor mode...');
+    void playEngine(script);
+  }, [appendLog, engineState, isProjectLoading, isReady, playEngine, script]);
 
   const handlePlayEngine = useCallback(() => {
     appendLog('INFO', 'Starting Vertra Engine…');
@@ -286,6 +302,18 @@ export default function EditorPage() {
     [appendLog, updateBuffer]
   );
 
+  const handleEngineTransformChange = useCallback(
+    (
+      id: number,
+      position: [number, number, number],
+      rotation: [number, number, number],
+      scale: [number, number, number],
+    ) => {
+      applyTransformToEngine(id, position, rotation, scale);
+    },
+    [applyTransformToEngine]
+  );
+
   if (isProjectLoading) {
     return (
       <motion.div
@@ -322,8 +350,10 @@ export default function EditorPage() {
             onSaveVtr={handleSaveVtr}
             onLoadVtr={handleLoadVtr}
             engineState={engineState}
+            engineMode={engineMode}
             onPlayEngine={handlePlayEngine}
             onStopEngine={handleStopEngine}
+            onToggleEditorMode={toggleEditorMode}
           />
         }
         leftSidebar={<SceneTree />}
@@ -335,6 +365,8 @@ export default function EditorPage() {
             entityCount={Math.max(scene.entities.size - 1, 0)}
             engineState={engineState}
             engineError={vertraEngineError}
+            isEditorMode={engineMode === 'editor'}
+            sendEditorEvent={sendEditorEvent}
           />
         }
         rightSidebar={
@@ -342,6 +374,8 @@ export default function EditorPage() {
             onBufferPatch={handleTransformPatch}
             engineReady={isReady}
             engineLoading={isEngineLoading}
+            engineSelectedObject={engineSelectedObject}
+            onEngineTransformChange={handleEngineTransformChange}
           />
         }
         bottomPanel={

@@ -18,6 +18,7 @@ import {
   Square,
   HardDriveDownload,
   FolderOpen,
+  Pencil,
 } from 'lucide-react';
 import { EngineState } from '@/hooks/useVertraEngine';
 import { useSceneStore } from '@/stores/sceneStore';
@@ -34,8 +35,10 @@ interface ToolbarProps {
   onLoadVtr: (file: File) => void;
   canSyncToCloud?: boolean;
   engineState: EngineState;
+  engineMode?: 'editor' | 'play' | null;
   onPlayEngine: () => void;
   onStopEngine: () => void;
+  onToggleEditorMode?: () => void;
 }
 
 type BusyAction = 'save' | 'vertra' | 'png' | 'sync' | 'save-vtr' | null;
@@ -49,8 +52,10 @@ export default function Toolbar({
   onLoadVtr,
   canSyncToCloud = false,
   engineState,
+  engineMode,
   onPlayEngine,
   onStopEngine,
+  onToggleEditorMode,
 }: ToolbarProps) {
   const { addEntity, currentProject } = useSceneStore();
   const { activeTool, setActiveTool } = useUIStore();
@@ -136,17 +141,41 @@ export default function Toolbar({
 
       {/* ── Play / Stop engine button ── */}
       <div className="mx-1 h-5 w-px bg-vertra-border/40" />
-      {engineState === 'running' ? (
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={onStopEngine}
-          title="Stop Engine"
-        >
-          <Square className="h-3.5 w-3.5 fill-current" />
-          <span>Stop</span>
-        </Button>
-      ) : (
+      {engineState === 'running' && (
+        <>
+          {/* Editor mode controls while engine is running */}
+          <Button
+            variant="ghost"
+            size="sm"
+            active={engineMode === 'play'}
+            onClick={onToggleEditorMode}
+            title={engineMode === 'editor' ? 'Exit editor and continue in Play mode' : 'Re-enter editor mode'}
+          >
+            {engineMode === 'editor' ? (
+              <>
+                <Play className="h-3.5 w-3.5 fill-current" />
+                <span>Play</span>
+              </>
+            ) : (
+              <>
+                <Pencil className="h-3.5 w-3.5" />
+                <span>Edit</span>
+              </>
+            )}
+          </Button>
+          <div className="mx-1 h-5 w-px bg-vertra-border/40" />
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={onStopEngine}
+            title="Stop Engine"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+            <span>Stop</span>
+          </Button>
+        </>
+      )}
+      {engineState !== 'running' && (
         <Button
           variant="accent"
           size="sm"

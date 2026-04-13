@@ -1,12 +1,12 @@
 'use client';
 
-import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Canvas } from '@react-three/fiber';
 import { Eye, Loader2 } from 'lucide-react';
 import { useCanvasResize } from '@/hooks/useCanvasResize';
 import { Skeleton } from '@/components/ui/skeleton';
-import { EngineState } from '@/hooks/useVertraEngine';
+import { EngineState, type EditorEventPayload } from '@/hooks/useVertraEngine';
 
 export interface ViewportHandle {
   captureScreenshot: () => Promise<Blob | null>;
@@ -18,10 +18,12 @@ interface ViewportProps {
   entityCount: number;
   engineState: EngineState;
   engineError: string | null;
+  isEditorMode?: boolean;
+  sendEditorEvent?: (payload: EditorEventPayload) => void;
 }
 
 const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewport(
-  { isEngineReady, isEngineLoading, entityCount, engineState, engineError },
+  { isEngineReady, isEngineLoading, entityCount, engineState, engineError, isEditorMode, sendEditorEvent },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,6 +43,73 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewport(
       });
     },
   }));
+
+  // Forward mouse/keyboard events to the Vertra editor subsystem when in editor mode
+  useEffect(() => {
+    if (!isEditorMode || !sendEditorEvent) return;
+
+    const canvas = document.getElementById('vertra-canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      sendEditorEvent({ type: 'mouse_motion', dx: e.movementX, dy: e.movementY });
+      const rect = canvas.getBoundingClientRect();
+      sendEditorEvent({ type: 'cursor_moved', x: e.clientX - rect.left, y: e.clientY - rect.top });
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      sendEditorEvent({
+        type: 'mouse_button',
+        left: e.button === 0 ? true : undefined,
+        middle: e.button === 1 ? true : undefined,
+        right: e.button === 2 ? true : undefined,
+      });
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      sendEditorEvent({
+        type: 'mouse_button',
+        left: e.button === 0 ? false : undefined,
+        middle: e.button === 1 ? false : undefined,
+        right: e.button === 2 ? false : undefined,
+      });
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      sendEditorEvent({ type: 'scroll', delta: -e.deltaY * 0.01 });
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as Element;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+      sendEditorEvent({ type: 'modifiers', alt: e.altKey, ctrl: e.ctrlKey });
+      sendEditorEvent({ type: 'key_pressed', code: e.code });
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      const target = e.target as Element;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+      sendEditorEvent({ type: 'modifiers', alt: e.altKey, ctrl: e.ctrlKey });
+      sendEditorEvent({ type: 'key_released', code: e.code });
+    };
+
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
+    return () => {
+      canvas.removeEventListener('mousemove', onMouseMove);
+      canvas.removeEventListener('mousedown', onMouseDown);
+      canvas.removeEventListener('mouseup', onMouseUp);
+      canvas.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [isEditorMode, sendEditorEvent]);
 
   const isRunning = engineState === 'running';
   const isEngineLoading2 = engineState === 'loading';
