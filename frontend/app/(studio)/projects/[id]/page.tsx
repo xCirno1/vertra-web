@@ -12,7 +12,7 @@ import BottomPanel from '@/components/studio/bottom-panel/BottomPanel';
 import { useSceneStore } from '@/stores/sceneStore';
 import { BufferPatch, useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
-import { exportSceneAsVertra } from '@/lib/scene/scene-serializer';
+
 import { DEFAULT_ENGINE_SCRIPT } from '@/lib/constants/defaultScript';
 import {
   createProjectDraft,
@@ -65,12 +65,12 @@ export default function EditorPage() {
     engineMode,
     engineSelectedObject,
     play: playEngine,
-    stop: stopEngine,
     saveSceneVtr,
     loadSceneVtr,
     toggleEditorMode,
     sendEditorEvent,
     applyTransformToEngine,
+    spawnObject,
   } = useVertraEngine();
 
   const viewportRef = useRef<ViewportHandle>(null);
@@ -195,14 +195,10 @@ export default function EditorPage() {
   }, [appendLog, engineState, isProjectLoading, isReady, playEngine, script]);
 
   const handlePlayEngine = useCallback(() => {
-    appendLog('INFO', 'Starting Vertra Engine…');
+    appendLog('INFO', 'Playing — going into play mode…');
     void playEngine(script);
   }, [appendLog, playEngine, script]);
 
-  const handleStopEngine = useCallback(() => {
-    stopEngine();
-    appendLog('INFO', 'Vertra Engine stopped.');
-  }, [appendLog, stopEngine]);
 
   const handleSave = useCallback(async () => {
     const activeProject: EngineProject = {
@@ -219,13 +215,6 @@ export default function EditorPage() {
     setCanSyncToCloud(refreshed.canSyncToCloud);
     appendLog('SUCCESS', `Project saved to ${destination} storage.`);
   }, [appendLog, currentProject, projectId, scene, script]);
-
-  const handleExportVertra = useCallback(() => {
-    const blob = exportSceneAsVertra(scene);
-    const filePrefix = normalizeFileName(currentProject?.name || `project-${projectId}`);
-    downloadBlob(blob, `${filePrefix || 'vertra-scene'}.vertra`);
-    appendLog('SUCCESS', 'Exported scene as .vertra file.');
-  }, [appendLog, currentProject?.name, projectId, scene]);
 
   const handleExportPng = useCallback(async () => {
     const blob = await viewportRef.current?.captureScreenshot();
@@ -314,6 +303,18 @@ export default function EditorPage() {
     [applyTransformToEngine]
   );
 
+  const handleCreateObject = useCallback(
+    async (objectData: { name: string; geometryType: 'cube' | 'box' | 'sphere' | 'pyramid' | 'plane'; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number]; color?: [number, number, number, number] }) => {
+      const objectId = spawnObject(objectData);
+      if (objectId === null) {
+        appendLog('ERROR', `Failed to create object "${objectData.name}"`);
+        throw new Error('Failed to spawn object in scene');
+      }
+      appendLog('SUCCESS', `Created object "${objectData.name}" (ID: ${objectId})`);
+    },
+    [spawnObject, appendLog]
+  );
+
   if (isProjectLoading) {
     return (
       <motion.div
@@ -343,16 +344,15 @@ export default function EditorPage() {
         toolbar={
           <Toolbar
             onSave={handleSave}
-            onExportVertra={handleExportVertra}
             onExportPng={handleExportPng}
             onSyncToCloud={handleSyncToCloud}
             canSyncToCloud={canSyncToCloud}
             onSaveVtr={handleSaveVtr}
             onLoadVtr={handleLoadVtr}
+            onCreateObject={handleCreateObject}
             engineState={engineState}
             engineMode={engineMode}
             onPlayEngine={handlePlayEngine}
-            onStopEngine={handleStopEngine}
             onToggleEditorMode={toggleEditorMode}
           />
         }

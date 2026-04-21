@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Move3d,
   RotateCw,
   ZoomOut,
   Save,
-  Download,
   ImageIcon,
   UploadCloud,
   Loader2,
@@ -15,29 +14,29 @@ import {
   Box,
   Camera,
   Play,
-  Square,
   HardDriveDownload,
   FolderOpen,
   Pencil,
+  Plus,
 } from 'lucide-react';
-import { EngineState } from '@/hooks/useVertraEngine';
+import { EngineState, type ObjectCreationData } from '@/hooks/useVertraEngine';
 import { useSceneStore } from '@/stores/sceneStore';
 import { useUIStore } from '@/stores/uiStore';
 import { SelectionMode } from '@/types/scene';
 import { Button } from '@/components/ui/button';
+import ObjectCreationDialog from '@/components/studio/ObjectCreationDialog';
 
 interface ToolbarProps {
   onSave: () => Promise<void> | void;
-  onExportVertra: () => void;
   onExportPng: () => Promise<void> | void;
   onSyncToCloud?: () => Promise<void> | void;
   onSaveVtr: () => Promise<void> | void;
   onLoadVtr: (file: File) => void;
+  onCreateObject?: (objectData: ObjectCreationData) => Promise<void> | void;
   canSyncToCloud?: boolean;
   engineState: EngineState;
   engineMode?: 'editor' | 'play' | null;
   onPlayEngine: () => void;
-  onStopEngine: () => void;
   onToggleEditorMode?: () => void;
 }
 
@@ -45,21 +44,22 @@ type BusyAction = 'save' | 'vertra' | 'png' | 'sync' | 'save-vtr' | null;
 
 export default function Toolbar({
   onSave,
-  onExportVertra,
   onExportPng,
   onSyncToCloud,
   onSaveVtr,
   onLoadVtr,
+  onCreateObject,
   canSyncToCloud = false,
   engineState,
   engineMode,
   onPlayEngine,
-  onStopEngine,
   onToggleEditorMode,
 }: ToolbarProps) {
   const { addEntity, currentProject } = useSceneStore();
   const { activeTool, setActiveTool } = useUIStore();
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [isObjectDialogOpen, setIsObjectDialogOpen] = useState(false);
+  const [isCreatingObject, setIsCreatingObject] = useState(false);
 
   // Hidden file input for .vtr load
   const vtrInputRef = useRef<HTMLInputElement>(null);
@@ -86,6 +86,17 @@ export default function Toolbar({
       setBusyAction(null);
     }
   };
+
+  const handleObjectCreation = useCallback(async (objectData: ObjectCreationData) => {
+    setIsCreatingObject(true);
+    try {
+      if (onCreateObject) {
+        await onCreateObject(objectData);
+      }
+    } finally {
+      setIsCreatingObject(false);
+    }
+  }, [onCreateObject]);
 
   return (
     <motion.div
@@ -137,6 +148,15 @@ export default function Toolbar({
             <span>{label}</span>
           </Button>
         ))}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setIsObjectDialogOpen(true)}
+          title="Add object with advanced options"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Add</span>
+        </Button>
       </div>
 
       {/* ── Play / Stop engine button ── */}
@@ -164,15 +184,6 @@ export default function Toolbar({
             )}
           </Button>
           <div className="mx-1 h-5 w-px bg-vertra-border/40" />
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={onStopEngine}
-            title="Stop Engine"
-          >
-            <Square className="h-3.5 w-3.5 fill-current" />
-            <span>Stop</span>
-          </Button>
         </>
       )}
       {engineState !== 'running' && (
@@ -216,21 +227,6 @@ export default function Toolbar({
             <Save className="w-3.5 h-3.5" />
           )}
           <span>Save</span>
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => runAction('vertra', async () => onExportVertra())}
-          disabled={busyAction !== null}
-          title="Export .vertra"
-        >
-          {busyAction === 'vertra' ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Download className="w-3.5 h-3.5" />
-          )}
-          <span>.vertra</span>
         </Button>
 
         <Button
@@ -306,6 +302,14 @@ export default function Toolbar({
           }}
         />
       </div>
+
+      {/* Object Creation Dialog */}
+      <ObjectCreationDialog
+        isOpen={isObjectDialogOpen}
+        onClose={() => setIsObjectDialogOpen(false)}
+        onCreateObject={handleObjectCreation}
+        isLoading={isCreatingObject}
+      />
     </motion.div>
   );
 }

@@ -150,10 +150,12 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewport(
       </div>
 
       {/* ── Vertra engine canvas — always in the DOM so engine.start() can find it ── */}
+      {/* Use visibility instead of display:none so the canvas keeps real dimensions  */}
+      {/* when the engine calls getContext('webgpu') during the loading state.        */}
       <canvas
         id="vertra-canvas"
         className="absolute inset-0 h-full w-full"
-        style={{ display: isRunning ? 'block' : 'none' }}
+        style={{ visibility: 'visible' }}
       />
 
       {/* ── Engine loading overlay ── */}
