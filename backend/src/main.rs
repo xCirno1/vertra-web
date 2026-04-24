@@ -1,5 +1,9 @@
 use std::net::SocketAddr;
 
+use aws_sdk_s3::{
+    config::{BehaviorVersion, Credentials, Region},
+    Client as S3Client,
+};
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::{Any, CorsLayer};
@@ -46,7 +50,28 @@ async fn main() {
         .await
         .expect("Failed to run database migrations");
 
-    let state = AppState { db: pool, config: config.clone() };
+    // Build the Cloudflare R2 S3-compatible client.
+    let r2_credentials = Credentials::new(
+        &config.aws_access_key_id,
+        &config.aws_secret_access_key,
+        None,
+        None,
+        "r2",
+    );
+    let r2_endpoint = format!(
+        "https://{}.r2.cloudflarestorage.com",
+        config.r2_account_id
+    );
+    let s3_config = aws_sdk_s3::Config::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .credentials_provider(r2_credentials)
+        .region(Region::new("auto"))
+        .endpoint_url(r2_endpoint)
+        .force_path_style(true)
+        .build();
+    let s3 = S3Client::from_conf(s3_config);
+
+    let state = AppState { db: pool, config: config.clone(), s3 };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)

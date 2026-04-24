@@ -23,6 +23,7 @@ export default function AppFrame({ children }: AppFrameProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const isEditorRoute = Boolean(pathname?.match(/^\/projects\/[^/]+$/));
+  const isHomePage = pathname === '/';
 
   useEffect(() => {
     let mounted = true;
@@ -40,12 +41,12 @@ export default function AppFrame({ children }: AppFrameProps) {
     };
   }, [pathname]);
 
-  if (isEditorRoute) {
+  if (isEditorRoute || isHomePage) {
     return <>{children}</>;
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-vertra-bg">
+    <div className="relative min-h-screen bg-vertra-bg">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(29,212,246,0.10),transparent_45%),radial-gradient(circle_at_85%_85%,rgba(142,207,190,0.08),transparent_50%)]" />
 
       <motion.header
@@ -69,8 +70,8 @@ export default function AppFrame({ children }: AppFrameProps) {
                   key={href}
                   href={href}
                   className={`rounded-md px-3 py-1.5 transition-colors ${isActive
-                      ? 'bg-vertra-surface text-vertra-text'
-                      : 'text-vertra-text-dim hover:bg-vertra-surface/60 hover:text-vertra-text'
+                    ? 'bg-vertra-surface text-vertra-text'
+                    : 'text-vertra-text-dim hover:bg-vertra-surface/60 hover:text-vertra-text'
                     }`}
                 >
                   {label}

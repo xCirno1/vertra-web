@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Move3d,
   RotateCw,
   ZoomOut,
   Save,
-  Download,
   ImageIcon,
   UploadCloud,
   Loader2,
@@ -15,12 +14,15 @@ import {
   Box,
   Camera,
   Play,
-  Square,
   HardDriveDownload,
   FolderOpen,
   Pencil,
+  ChevronDown,
+  Circle,
+  Square,
+  Triangle,
 } from 'lucide-react';
-import { EngineState } from '@/hooks/useVertraEngine';
+import { EngineState, GeometryType } from '@/hooks/useVertraEngine';
 import { useSceneStore } from '@/stores/sceneStore';
 import { useUIStore } from '@/stores/uiStore';
 import { SelectionMode } from '@/types/scene';
@@ -28,7 +30,6 @@ import { Button } from '@/components/ui/button';
 
 interface ToolbarProps {
   onSave: () => Promise<void> | void;
-  onExportVertra: () => void;
   onExportPng: () => Promise<void> | void;
   onSyncToCloud?: () => Promise<void> | void;
   onSaveVtr: () => Promise<void> | void;
@@ -37,15 +38,22 @@ interface ToolbarProps {
   engineState: EngineState;
   engineMode?: 'editor' | 'play' | null;
   onPlayEngine: () => void;
-  onStopEngine: () => void;
   onToggleEditorMode?: () => void;
+  onSpawnGeometry?: (type: GeometryType) => void;
 }
 
-type BusyAction = 'save' | 'vertra' | 'png' | 'sync' | 'save-vtr' | null;
+type BusyAction = 'save' | 'png' | 'sync' | 'save-vtr' | null;
+
+const GEOMETRY_OPTIONS: Array<{ type: GeometryType; label: string; icon: React.ReactNode }> = [
+  { type: 'cube', label: 'Cube', icon: <Box className="w-3.5 h-3.5" /> },
+  { type: 'sphere', label: 'Sphere', icon: <Circle className="w-3.5 h-3.5" /> },
+  { type: 'plane', label: 'Plane', icon: <Square className="w-3.5 h-3.5" /> },
+  { type: 'box', label: 'Box', icon: <Box className="w-3.5 h-3.5" /> },
+  { type: 'pyramid', label: 'Pyramid', icon: <Triangle className="w-3.5 h-3.5" /> },
+];
 
 export default function Toolbar({
   onSave,
-  onExportVertra,
   onExportPng,
   onSyncToCloud,
   onSaveVtr,
@@ -54,15 +62,42 @@ export default function Toolbar({
   engineState,
   engineMode,
   onPlayEngine,
-  onStopEngine,
   onToggleEditorMode,
+  onSpawnGeometry,
 }: ToolbarProps) {
   const { addEntity, currentProject } = useSceneStore();
   const { activeTool, setActiveTool } = useUIStore();
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [geoMenuOpen, setGeoMenuOpen] = useState(false);
 
-  // Hidden file input for .vtr load
+  const fileMenuRef = useRef<HTMLDivElement>(null);
+  const geoMenuRef = useRef<HTMLDivElement>(null);
   const vtrInputRef = useRef<HTMLInputElement>(null);
+
+  // Close file dropdown on outside click
+  useEffect(() => {
+    if (!fileMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (fileMenuRef.current && !fileMenuRef.current.contains(e.target as Node)) {
+        setFileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [fileMenuOpen]);
+
+  // Close geometry dropdown on outside click
+  useEffect(() => {
+    if (!geoMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (geoMenuRef.current && !geoMenuRef.current.contains(e.target as Node)) {
+        setGeoMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [geoMenuOpen]);
 
   const tools: Array<{
     id: Exclude<SelectionMode, 'none'>;
@@ -77,8 +112,9 @@ export default function Toolbar({
 
   const runAction = async (
     action: BusyAction,
-    callback: () => Promise<void> | void
+    callback: () => Promise<void> | void,
   ) => {
+    setFileMenuOpen(false);
     setBusyAction(action);
     try {
       await callback();
@@ -86,6 +122,8 @@ export default function Toolbar({
       setBusyAction(null);
     }
   };
+
+  const engineRunning = engineState === 'running';
 
   return (
     <motion.div
@@ -98,7 +136,6 @@ export default function Toolbar({
         {tools.map((tool) => {
           const Icon = tool.icon;
           const isActive = activeTool === tool.id;
-
           return (
             <Button
               key={tool.id}
@@ -119,63 +156,91 @@ export default function Toolbar({
 
       {/* Add entity buttons */}
       <div className="flex gap-0.5">
-        {(
-          [
-            { type: 'mesh', label: 'Mesh', Icon: Box, title: 'Add Mesh' },
-            { type: 'light', label: 'Light', Icon: Lightbulb, title: 'Add Light' },
-            { type: 'camera', label: 'Camera', Icon: Camera, title: 'Add Camera' },
-          ] as const
-        ).map(({ type, label, Icon, title }) => (
+        {/* Geometry dropdown */}
+        <div ref={geoMenuRef} className="relative">
           <Button
-            key={type}
             variant="ghost"
             size="sm"
-            onClick={() => addEntity(type)}
-            title={title}
+            active={geoMenuOpen}
+            onClick={() => setGeoMenuOpen((v) => !v)}
+            title="Add Geometry"
           >
-            <Icon className="w-3.5 h-3.5" />
-            <span>{label}</span>
+            <Box className="w-3.5 h-3.5" />
+            <span>Mesh</span>
+            <ChevronDown className="w-3 h-3 opacity-60" />
           </Button>
-        ))}
+
+          <AnimatePresence>
+            {geoMenuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                transition={{ duration: 0.1 }}
+                className="absolute left-0 top-full mt-1 w-40 rounded-lg border border-vertra-border/40 bg-vertra-surface/95 backdrop-blur shadow-xl z-50 py-1"
+              >
+                {GEOMETRY_OPTIONS.map(({ type, label, icon }) => (
+                  <DropdownItem
+                    key={type}
+                    icon={icon}
+                    label={label}
+                    disabled={!engineRunning}
+                    disabledHint="Start engine first"
+                    onClick={() => {
+                      setGeoMenuOpen(false);
+                      onSpawnGeometry?.(type);
+                    }}
+                  />
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => addEntity('light')}
+          title="Add Light"
+        >
+          <Lightbulb className="w-3.5 h-3.5" />
+          <span>Light</span>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => addEntity('camera')}
+          title="Add Camera"
+        >
+          <Camera className="w-3.5 h-3.5" />
+          <span>Camera</span>
+        </Button>
       </div>
 
-      {/* ── Play / Stop engine button ── */}
       <div className="mx-1 h-5 w-px bg-vertra-border/40" />
-      {engineState === 'running' && (
-        <>
-          {/* Editor mode controls while engine is running */}
-          <Button
-            variant="ghost"
-            size="sm"
-            active={engineMode === 'play'}
-            onClick={onToggleEditorMode}
-            title={engineMode === 'editor' ? 'Exit editor and continue in Play mode' : 'Re-enter editor mode'}
-          >
-            {engineMode === 'editor' ? (
-              <>
-                <Play className="h-3.5 w-3.5 fill-current" />
-                <span>Play</span>
-              </>
-            ) : (
-              <>
-                <Pencil className="h-3.5 w-3.5" />
-                <span>Edit</span>
-              </>
-            )}
-          </Button>
-          <div className="mx-1 h-5 w-px bg-vertra-border/40" />
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={onStopEngine}
-            title="Stop Engine"
-          >
-            <Square className="h-3.5 w-3.5 fill-current" />
-            <span>Stop</span>
-          </Button>
-        </>
-      )}
-      {engineState !== 'running' && (
+
+      {/* Play / Edit mode toggle */}
+      {engineRunning ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          active={engineMode === 'play'}
+          onClick={onToggleEditorMode}
+          title={engineMode === 'editor' ? 'Switch to Play mode' : 'Switch to Editor mode'}
+        >
+          {engineMode === 'editor' ? (
+            <>
+              <Play className="h-3.5 w-3.5 fill-current" />
+              <span>Play</span>
+            </>
+          ) : (
+            <>
+              <Pencil className="h-3.5 w-3.5" />
+              <span>Edit</span>
+            </>
+          )}
+        </Button>
+      ) : (
         <Button
           variant="accent"
           size="sm"
@@ -201,97 +266,86 @@ export default function Toolbar({
         )}
       </div>
 
-      {/* Action buttons */}
-      <div className="flex gap-0.5">
+      {/* File dropdown */}
+      <div ref={fileMenuRef} className="relative">
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => runAction('save', onSave)}
+          onClick={() => setFileMenuOpen((v) => !v)}
           disabled={busyAction !== null}
-          title="Save (Ctrl+S)"
+          active={fileMenuOpen}
+          title="File actions"
         >
-          {busyAction === 'save' ? (
+          {busyAction !== null ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
             <Save className="w-3.5 h-3.5" />
           )}
-          <span>Save</span>
+          <span>File</span>
+          <ChevronDown className="w-3 h-3 opacity-60" />
         </Button>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => runAction('vertra', async () => onExportVertra())}
-          disabled={busyAction !== null}
-          title="Export .vertra"
-        >
-          {busyAction === 'vertra' ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Download className="w-3.5 h-3.5" />
+        <AnimatePresence>
+          {fileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -4, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.97 }}
+              transition={{ duration: 0.1 }}
+              className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-vertra-border/40 bg-vertra-surface/95 backdrop-blur shadow-xl z-50 py-1"
+            >
+              {/* Save */}
+              <DropdownItem
+                icon={<Save className="w-3.5 h-3.5" />}
+                label="Save"
+                hint="Ctrl+S"
+                onClick={() => runAction('save', onSave)}
+              />
+
+              {/* Export PNG */}
+              <DropdownItem
+                icon={<ImageIcon className="w-3.5 h-3.5" />}
+                label="Export PNG"
+                onClick={() => runAction('png', onExportPng)}
+              />
+
+              {/* Sync to Cloud */}
+              {canSyncToCloud && onSyncToCloud && (
+                <>
+                  <DropdownDivider />
+                  <DropdownItem
+                    icon={<UploadCloud className="w-3.5 h-3.5" />}
+                    label="Sync to Cloud"
+                    onClick={() => runAction('sync', onSyncToCloud)}
+                  />
+                </>
+              )}
+
+              <DropdownDivider />
+
+              {/* Save .vtr */}
+              <DropdownItem
+                icon={<HardDriveDownload className="w-3.5 h-3.5" />}
+                label="Save Snapshot (.vtr)"
+                disabled={!engineRunning}
+                disabledHint="Start engine first"
+                onClick={() => runAction('save-vtr', onSaveVtr)}
+              />
+
+              {/* Load .vtr */}
+              <DropdownItem
+                icon={<FolderOpen className="w-3.5 h-3.5" />}
+                label="Load Snapshot (.vtr)"
+                disabled={!engineRunning}
+                disabledHint="Start engine first"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  vtrInputRef.current?.click();
+                }}
+              />
+            </motion.div>
           )}
-          <span>.vertra</span>
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => runAction('png', onExportPng)}
-          disabled={busyAction !== null}
-          title="Capture PNG"
-        >
-          {busyAction === 'png' ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <ImageIcon className="w-3.5 h-3.5" />
-          )}
-          <span>PNG</span>
-        </Button>
-
-        {canSyncToCloud && onSyncToCloud && (
-          <Button
-            variant="accent"
-            size="sm"
-            onClick={() => runAction('sync', onSyncToCloud)}
-            disabled={busyAction !== null}
-            title="Sync local projects to cloud"
-          >
-            {busyAction === 'sync' ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <UploadCloud className="w-3.5 h-3.5" />
-            )}
-            <span>Sync</span>
-          </Button>
-        )}
-
-        {/* .vtr save/load — only available while engine is running */}
-        <div className="mx-1 h-5 w-px bg-vertra-border/40" />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => runAction('save-vtr', onSaveVtr)}
-          disabled={busyAction !== null || engineState !== 'running'}
-          title={engineState !== 'running' ? 'Start engine first' : 'Save .vtr snapshot'}
-        >
-          {busyAction === 'save-vtr' ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <HardDriveDownload className="w-3.5 h-3.5" />
-          )}
-          <span>.vtr</span>
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => vtrInputRef.current?.click()}
-          disabled={busyAction !== null || engineState !== 'running'}
-          title={engineState !== 'running' ? 'Start engine first' : 'Load .vtr snapshot'}
-        >
-          <FolderOpen className="w-3.5 h-3.5" />
-          <span>Load .vtr</span>
-        </Button>
+        </AnimatePresence>
 
         {/* Hidden file input for .vtr loading */}
         <input
@@ -308,4 +362,35 @@ export default function Toolbar({
       </div>
     </motion.div>
   );
+}
+
+// ─── Dropdown primitives ──────────────────────────────────────────────────────
+
+interface DropdownItemProps {
+  icon: React.ReactNode;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+  disabledHint?: string;
+  onClick: () => void;
+}
+
+function DropdownItem({ icon, label, hint, disabled, disabledHint, onClick }: DropdownItemProps) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={disabled && disabledHint ? disabledHint : undefined}
+      onClick={onClick}
+      className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-1.5 text-xs text-vertra-text hover:bg-vertra-surface-alt/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+    >
+      <span className="text-vertra-text-dim">{icon}</span>
+      <span className="flex-1 text-left">{label}</span>
+      {hint && <span className="text-vertra-text-dim/60">{hint}</span>}
+    </button>
+  );
+}
+
+function DropdownDivider() {
+  return <div className="my-1 h-px bg-vertra-border/30" />;
 }

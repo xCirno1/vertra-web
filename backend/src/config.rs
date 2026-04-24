@@ -9,6 +9,14 @@ pub struct Config {
     pub port: u16,
     /// Allowed CORS origin for the frontend (e.g. http://localhost:3000).
     pub frontend_origin: String,
+    /// Cloudflare R2 account ID (used to build the S3-compatible endpoint URL).
+    pub r2_account_id: String,
+    /// Name of the R2 bucket used for .vtr file storage.
+    pub r2_bucket_name: String,
+    /// R2 S3-compatible API access key ID.
+    pub aws_access_key_id: String,
+    /// R2 S3-compatible API secret access key.
+    pub aws_secret_access_key: String,
 }
 
 impl Config {
@@ -32,6 +40,20 @@ impl Config {
         let frontend_origin = std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-        Ok(Config { database_url, jwt_secret, port, frontend_origin })
+        let r2_account_id = std::env::var("R2_ACCOUNT_ID").unwrap_or_default();
+        let r2_bucket_name = std::env::var("R2_BUCKET_NAME").unwrap_or_default();
+        let aws_access_key_id = std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_default();
+        let aws_secret_access_key = std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_default();
+
+        Ok(Config {
+            database_url,
+            jwt_secret,
+            port,
+            frontend_origin,
+            r2_account_id,
+            r2_bucket_name,
+            aws_access_key_id,
+            aws_secret_access_key,
+        })
     }
 }

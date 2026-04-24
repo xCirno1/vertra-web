@@ -5,6 +5,7 @@ use crate::state::AppState;
 
 pub mod auth;
 pub mod projects;
+pub mod vtr;
 
 /// Build the main application router with all named sub-routers attached.
 pub fn create_router(state: AppState) -> Router {
@@ -23,6 +24,11 @@ pub fn create_router(state: AppState) -> Router {
             get(projects::get_project)
                 .patch(projects::update_project)
                 .delete(projects::delete_project),
+        )
+        // VTR snapshot endpoints (Cloudflare R2)
+        .route(
+            "/api/vtr/:project_id",
+            axum::routing::put(vtr::upload_vtr).get(vtr::download_vtr),
         )
         .with_state(state)
 }

@@ -5,6 +5,7 @@ import init, { VertraObject, Geometry, Transform, Camera } from '../../public/en
 import type { WebWindow, Scene, FrameContext, InspectorData, EditorEventPayload } from '../../public/engine/vertra_binder.js';
 
 export type EngineState = 'idle' | 'loading' | 'running' | 'error';
+export type GeometryType = 'cube' | 'sphere' | 'plane' | 'box' | 'pyramid';
 export type { InspectorData, EditorEventPayload };
 
 interface UseVertraEngineReturn {
@@ -24,6 +25,7 @@ interface UseVertraEngineReturn {
     rotation: [number, number, number],
     scale: [number, number, number],
   ) => void;
+  spawnGeometry: (type: GeometryType, name?: string) => number | null;
 }
 
 // Shape of the object the user script must return.
@@ -273,6 +275,26 @@ export function useVertraEngine(): UseVertraEngineReturn {
     obj.transform = t;
   }, []);
 
+  const spawnGeometry = useCallback((type: GeometryType, name?: string): number | null => {
+    const scene = sceneRef.current;
+    if (!scene) return null;
+
+    const displayName = name ?? (type.charAt(0).toUpperCase() + type.slice(1));
+    const obj = new VertraObject(displayName);
+
+    let geo: Geometry;
+    switch (type) {
+      case 'cube': geo = Geometry.cube(1); break;
+      case 'sphere': geo = Geometry.sphere(0.5, 30); break;
+      case 'plane': geo = Geometry.plane(2); break;
+      case 'box': geo = Geometry.box(1, 1, 1); break;
+      case 'pyramid': geo = Geometry.pyramid(1, 1.5); break;
+    }
+
+    obj.set_geometry(geo);
+    return scene.spawn(obj);
+  }, []);
+
   return {
     engineState,
     engineError,
@@ -285,6 +307,7 @@ export function useVertraEngine(): UseVertraEngineReturn {
     toggleEditorMode,
     sendEditorEvent,
     applyTransformToEngine,
+    spawnGeometry,
   };
 }
 

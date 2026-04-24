@@ -12,10 +12,10 @@ import BottomPanel from '@/components/studio/bottom-panel/BottomPanel';
 import { useSceneStore } from '@/stores/sceneStore';
 import { BufferPatch, useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
-import { exportSceneAsVertra } from '@/lib/scene/scene-serializer';
 import { DEFAULT_ENGINE_SCRIPT } from '@/lib/constants/defaultScript';
 import {
   createProjectDraft,
+  getAuthToken,
   loadProjects,
   saveProject,
   syncLocalProjectsToCloud,
@@ -65,12 +65,12 @@ export default function EditorPage() {
     engineMode,
     engineSelectedObject,
     play: playEngine,
-    stop: stopEngine,
     saveSceneVtr,
     loadSceneVtr,
     toggleEditorMode,
     sendEditorEvent,
     applyTransformToEngine,
+    spawnGeometry,
   } = useVertraEngine();
 
   const viewportRef = useRef<ViewportHandle>(null);
@@ -199,11 +199,6 @@ export default function EditorPage() {
     void playEngine(script);
   }, [appendLog, playEngine, script]);
 
-  const handleStopEngine = useCallback(() => {
-    stopEngine();
-    appendLog('INFO', 'Vertra Engine stopped.');
-  }, [appendLog, stopEngine]);
-
   const handleSave = useCallback(async () => {
     const activeProject: EngineProject = {
       ...(currentProject || createProjectDraft(`Project ${projectId}`)),
@@ -219,13 +214,6 @@ export default function EditorPage() {
     setCanSyncToCloud(refreshed.canSyncToCloud);
     appendLog('SUCCESS', `Project saved to ${destination} storage.`);
   }, [appendLog, currentProject, projectId, scene, script]);
-
-  const handleExportVertra = useCallback(() => {
-    const blob = exportSceneAsVertra(scene);
-    const filePrefix = normalizeFileName(currentProject?.name || `project-${projectId}`);
-    downloadBlob(blob, `${filePrefix || 'vertra-scene'}.vertra`);
-    appendLog('SUCCESS', 'Exported scene as .vertra file.');
-  }, [appendLog, currentProject?.name, projectId, scene]);
 
   const handleExportPng = useCallback(async () => {
     const blob = await viewportRef.current?.captureScreenshot();
@@ -253,8 +241,31 @@ export default function EditorPage() {
     const plainBuffer = new Uint8Array(bytes).buffer as ArrayBuffer;
     const blob = new Blob([plainBuffer], { type: 'application/octet-stream' });
     const filePrefix = normalizeFileName(currentProject?.name || `project-${projectId}`);
+
+    // 1. Local download (always runs first so the user never loses the file)
     downloadBlob(blob, `${filePrefix || 'vertra-scene'}.vtr`);
     appendLog('SUCCESS', 'Scene snapshot saved as .vtr file.');
+
+    // 2. Cloud upload — non-fatal; errors are surfaced as warnings
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`/api/vtr/${projectId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: plainBuffer,
+      });
+      if (res.ok) {
+        appendLog('SUCCESS', 'Scene snapshot uploaded to cloud (R2).');
+      } else {
+        appendLog('WARN', `Cloud upload responded ${res.status} — snapshot saved locally only.`);
+      }
+    } catch (uploadErr) {
+      const reason = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+      appendLog('WARN', `Cloud upload failed: ${reason} — snapshot saved locally only.`);
+    }
   }, [appendLog, currentProject?.name, projectId, saveSceneVtr]);
 
   const handleLoadVtr = useCallback((file: File) => {
@@ -343,7 +354,6 @@ export default function EditorPage() {
         toolbar={
           <Toolbar
             onSave={handleSave}
-            onExportVertra={handleExportVertra}
             onExportPng={handleExportPng}
             onSyncToCloud={handleSyncToCloud}
             canSyncToCloud={canSyncToCloud}
@@ -352,8 +362,8 @@ export default function EditorPage() {
             engineState={engineState}
             engineMode={engineMode}
             onPlayEngine={handlePlayEngine}
-            onStopEngine={handleStopEngine}
             onToggleEditorMode={toggleEditorMode}
+            onSpawnGeometry={spawnGeometry}
           />
         }
         leftSidebar={<SceneTree />}
