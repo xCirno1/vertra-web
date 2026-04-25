@@ -125,9 +125,6 @@ export default function SceneTree() {
               } ${dropTargetId === entityId ? 'ring-1 ring-inset ring-vertra-cyan' : ''}`}
             style={{ paddingLeft: `${depth * 16 + 12}px` }}
           >
-            {hasChildren && (
-              <ChevronRight className="w-3 h-3 shrink-0 text-vertra-text-dim" />
-            )}
             {!hasChildren && <div className="w-3" />}
             <span className={entityColor}>{entityIcon}</span>
             <span className="text-xs truncate">{entity.name}</span>

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const BACKEND_URL = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const TOKEN_COOKIE = 'vertra-token';
+
+function authHeader(req: NextRequest): Record<string, string> {
+  const token = req.cookies.get(TOKEN_COOKIE)?.value;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
  * GET /api/vtr/[projectId]
@@ -12,10 +18,9 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   const { projectId } = await params;
-  const authHeader = req.headers.get('authorization');
 
   const backendRes = await fetch(`${BACKEND_URL}/api/vtr/${projectId}`, {
-    headers: authHeader ? { Authorization: authHeader } : {},
+    headers: authHeader(req),
   });
 
   if (!backendRes.ok) {
@@ -40,14 +45,13 @@ export async function PUT(
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   const { projectId } = await params;
-  const authHeader = req.headers.get('authorization');
   const body = await req.arrayBuffer();
 
   const backendRes = await fetch(`${BACKEND_URL}/api/vtr/${projectId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/octet-stream',
-      ...(authHeader ? { Authorization: authHeader } : {}),
+      ...authHeader(req),
     },
     body,
   });

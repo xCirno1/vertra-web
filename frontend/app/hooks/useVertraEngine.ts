@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import init, { VertraObject, Geometry, Transform, Camera } from '../../public/engine/vertra_binder.js';
 import type { WebWindow, Scene, FrameContext, InspectorData, EditorEventPayload } from '../../public/engine/vertra_binder.js';
 
 export type EngineState = 'idle' | 'loading' | 'running' | 'error';
 export type GeometryType = 'cube' | 'sphere' | 'plane' | 'box' | 'pyramid';
+export type AutosaveState = 'idle' | 'saving' | 'saved';
 export type { InspectorData, EditorEventPayload };
 
 interface UseVertraEngineReturn {
@@ -13,7 +14,8 @@ interface UseVertraEngineReturn {
   engineError: string | null;
   engineMode: 'editor' | 'play' | null;
   engineSelectedObject: InspectorData | undefined;
-  play: (script: string) => Promise<void>;
+  autosaveState: AutosaveState;
+  play: (script: string, initialVtrBytes?: Uint8Array) => Promise<void>;
   stop: () => void;
   saveSceneVtr: () => Promise<Uint8Array>;
   loadSceneVtr: (bytes: Uint8Array) => void;
@@ -62,17 +64,83 @@ function executeUserScript(scriptBody: string): UserScriptHandlers {
   return factory(VertraObject, Geometry, Transform, Camera) as UserScriptHandlers;
 }
 
-export function useVertraEngine(): UseVertraEngineReturn {
+interface UseVertraEngineOptions {
+  /** Project ID used for the autosave R2 upload endpoint. */
+  projectId?: string;
+
+  /** When false, autosave is disabled entirely. Defaults to true. */
+  autosaveEnabled?: boolean;
+  /** Called after a successful autosave upload. */
+  onAutosaveSuccess?: () => void;
+  /** Called when an autosave upload fails. */
+  onAutosaveError?: (reason: string) => void;
+}
+
+export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertraEngineReturn {
   const [engineState, setEngineState] = useState<EngineState>('idle');
   const [engineError, setEngineError] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<'editor' | 'play' | null>(null);
   const [engineSelectedObject, setEngineSelectedObject] = useState<InspectorData | undefined>(undefined);
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
 
   const engineRef = useRef<WebWindow | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const vtrBridge = useRef<VtrBridge>({ saveCallback: null, loadData: null });
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep a stable ref to options so closures captured at engine-start always see fresh values.
+  const optionsRef = useRef(options);
+  useEffect(() => { optionsRef.current = options; });
 
-  const play = useCallback(async (script: string) => {
+  /**
+   * Debounced VTR autosave: waits 5 s after the last mutation, then calls
+   * scene.save_vtr() directly (safe — WASM is single-threaded in browsers)
+   * and uploads the bytes to R2.
+   */
+  const triggerVtrAutosave = useCallback(() => {
+    if (optionsRef.current.autosaveEnabled === false) return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      const scene = sceneRef.current;
+      const { projectId, onAutosaveSuccess, onAutosaveError } = optionsRef.current;
+      if (!scene || !projectId) return;
+
+      let bytes: Uint8Array;
+      try {
+        bytes = scene.save_vtr();
+      } catch (err) {
+        onAutosaveError?.(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (bytes.length === 0) {
+        onAutosaveError?.('save_vtr returned empty bytes');
+        return;
+      }
+
+      setAutosaveState('saving');
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      fetch(`/api/vtr/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: buffer,
+      }).then(res => {
+        if (res.ok) {
+          onAutosaveSuccess?.();
+          setAutosaveState('saved');
+          if (autosaveSavedTimerRef.current) clearTimeout(autosaveSavedTimerRef.current);
+          autosaveSavedTimerRef.current = setTimeout(() => setAutosaveState('idle'), 3000);
+        } else {
+          onAutosaveError?.(`HTTP ${res.status}`);
+          setAutosaveState('idle');
+        }
+      }).catch((err: unknown) => {
+        onAutosaveError?.(err instanceof Error ? err.message : String(err));
+        setAutosaveState('idle');
+      });
+    }, 5000);
+  }, []);
+
+  const play = useCallback(async (script: string, initialVtrBytes?: Uint8Array) => {
     if (engineState === 'running' || engineState === 'loading') return;
 
     setEngineState('loading');
@@ -116,6 +184,15 @@ export function useVertraEngine(): UseVertraEngineReturn {
 
       // Startup logic
       win.on_startup((state: unknown, scene: Scene) => {
+        // Load VTR snapshot first so the scene is restored before editor mode activates.
+        if (initialVtrBytes && initialVtrBytes.length > 0) {
+          try {
+            scene.load_vtr(initialVtrBytes);
+          } catch (err) {
+            console.error('[Vertra] on_startup load_vtr error:', err);
+          }
+        }
+
         // Enable editor mode so the scene starts with gizmos and object picking
         scene.enable_editor_mode();
         sceneRef.current = scene;
@@ -135,7 +212,7 @@ export function useVertraEngine(): UseVertraEngineReturn {
       win.on_editor_event((event: EditorStateEvent) => {
         const eventType = event?.type;
         if (!eventType) return;
-        console.log(event);
+
         if (eventType === 'selection_changed' || eventType === 'SelectionChanged') {
           const inspectorData = sceneRef.current?.editor.inspector() as InspectorData | undefined;
           setEngineSelectedObject(inspectorData);
@@ -146,6 +223,19 @@ export function useVertraEngine(): UseVertraEngineReturn {
         if (eventType === 'drag_end' || eventType === 'DragEnd') {
           const inspectorData = sceneRef.current?.editor.inspector() as InspectorData | undefined;
           setEngineSelectedObject(inspectorData);
+        }
+
+        // Trigger autosave for any event that is NOT a pure view-state change.
+        // This covers drag_end, any future mutation events, etc.
+        if (
+          eventType !== 'gizmo_mode_changed' &&
+          eventType !== 'GizmoModeChanged' &&
+          eventType !== 'drag_start' &&
+          eventType !== 'DragStart' &&
+          eventType !== 'selection_changed' &&
+          eventType !== 'SelectionChanged'
+        ) {
+          triggerVtrAutosave();
         }
       });
 
@@ -193,6 +283,15 @@ export function useVertraEngine(): UseVertraEngineReturn {
   }, [engineState]);
 
   const stop = useCallback(() => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (autosaveSavedTimerRef.current) {
+      clearTimeout(autosaveSavedTimerRef.current);
+      autosaveSavedTimerRef.current = null;
+    }
+    setAutosaveState('idle');
     sceneRef.current = null;
     setEngineMode(null);
     setEngineSelectedObject(undefined);
@@ -273,7 +372,8 @@ export function useVertraEngine(): UseVertraEngineReturn {
     t.rotation = new Float32Array(rotation);
     t.scale = new Float32Array(scale);
     obj.transform = t;
-  }, []);
+    triggerVtrAutosave();
+  }, [triggerVtrAutosave]);
 
   const spawnGeometry = useCallback((type: GeometryType, name?: string): number | null => {
     const scene = sceneRef.current;
@@ -292,14 +392,17 @@ export function useVertraEngine(): UseVertraEngineReturn {
     }
 
     obj.set_geometry(geo);
-    return scene.spawn(obj);
-  }, []);
+    const id = scene.spawn(obj);
+    triggerVtrAutosave();
+    return id;
+  }, [triggerVtrAutosave]);
 
   return {
     engineState,
     engineError,
     engineMode,
     engineSelectedObject,
+    autosaveState,
     play,
     stop,
     saveSceneVtr,

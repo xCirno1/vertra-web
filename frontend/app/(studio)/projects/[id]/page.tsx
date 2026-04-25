@@ -15,11 +15,12 @@ import { useVertraEngine } from '@/hooks/useVertraEngine';
 import { DEFAULT_ENGINE_SCRIPT } from '@/lib/constants/defaultScript';
 import {
   createProjectDraft,
-  getAuthToken,
   loadProjects,
   saveProject,
   syncLocalProjectsToCloud,
+  DEFAULT_PROJECT_SETTINGS,
   type EngineProject,
+  type ProjectSettings,
   type ProjectSource,
 } from '@/lib/storage/project-storage';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -59,11 +60,23 @@ export default function EditorPage() {
     updateBuffer,
   } = useVertra();
 
+  const [isProjectLoading, setIsProjectLoading] = useState(true);
+  const [logs, setLogs] = useState<string[]>(['[INFO] Studio boot sequence started']);
+  const [projectSource, setProjectSource] = useState<ProjectSource>('local');
+  const [canSyncToCloud, setCanSyncToCloud] = useState(false);
+  const [script, setScript] = useState<string>(DEFAULT_ENGINE_SCRIPT);
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>(DEFAULT_PROJECT_SETTINGS);
+
+  const appendLog = useCallback((level: LogLevel, message: string) => {
+    setLogs((prev) => [...prev, `[${level}] ${message}`].slice(-200));
+  }, []);
+
   const {
     engineState,
     engineError: vertraEngineError,
     engineMode,
     engineSelectedObject,
+    autosaveState,
     play: playEngine,
     saveSceneVtr,
     loadSceneVtr,
@@ -71,22 +84,16 @@ export default function EditorPage() {
     sendEditorEvent,
     applyTransformToEngine,
     spawnGeometry,
-  } = useVertraEngine();
+  } = useVertraEngine({
+    projectId,
+    autosaveEnabled: projectSettings.autosaveEnabled,
+    onAutosaveError: (reason) => appendLog('WARN', `Autosave failed: ${reason}`),
+  });
 
   const viewportRef = useRef<ViewportHandle>(null);
   const didLogEngineLoading = useRef(false);
   const didLogEngineReady = useRef(false);
   const hasAutoStartedEngine = useRef(false);
-
-  const [isProjectLoading, setIsProjectLoading] = useState(true);
-  const [logs, setLogs] = useState<string[]>(['[INFO] Studio boot sequence started']);
-  const [projectSource, setProjectSource] = useState<ProjectSource>('local');
-  const [canSyncToCloud, setCanSyncToCloud] = useState(false);
-  const [script, setScript] = useState<string>(DEFAULT_ENGINE_SCRIPT);
-
-  const appendLog = useCallback((level: LogLevel, message: string) => {
-    setLogs((prev) => [...prev, `[${level}] ${message}`].slice(-200));
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -114,6 +121,7 @@ export default function EditorPage() {
       setCanSyncToCloud(result.canSyncToCloud);
       // Restore saved script, fall back to default
       setScript(project.script ?? DEFAULT_ENGINE_SCRIPT);
+      setProjectSettings({ ...DEFAULT_PROJECT_SETTINGS, ...project.settings });
       setIsProjectLoading(false);
       appendLog('SUCCESS', `Project loaded from ${result.source} storage.`);
     };
@@ -191,8 +199,22 @@ export default function EditorPage() {
 
     hasAutoStartedEngine.current = true;
     appendLog('INFO', 'Starting Vertra Engine in editor mode...');
-    void playEngine(script);
-  }, [appendLog, engineState, isProjectLoading, isReady, playEngine, script]);
+
+    fetch(`/api/vtr/${projectId}`).then(async (res) => {
+      let initialVtrBytes: Uint8Array | undefined;
+      if (res.ok) {
+        initialVtrBytes = new Uint8Array(await res.arrayBuffer());
+        appendLog('SUCCESS', 'Scene snapshot fetched — will restore on startup.');
+      } else if (res.status !== 404) {
+        appendLog('WARN', `VTR fetch responded ${res.status} — starting with empty scene.`);
+      }
+      void playEngine(script, initialVtrBytes);
+    }).catch((err: unknown) => {
+      const reason = err instanceof Error ? err.message : String(err);
+      appendLog('WARN', `VTR fetch failed: ${reason} — starting with empty scene.`);
+      void playEngine(script);
+    });
+  }, [appendLog, engineState, isProjectLoading, isReady, playEngine, projectId, script]);
 
   const handlePlayEngine = useCallback(() => {
     appendLog('INFO', 'Starting Vertra Engine…');
@@ -205,6 +227,7 @@ export default function EditorPage() {
       id: currentProject?.id || projectId,
       script,
       scene,
+      settings: projectSettings,
     };
 
     const destination = await saveProject(activeProject);
@@ -213,7 +236,7 @@ export default function EditorPage() {
     const refreshed = await loadProjects();
     setCanSyncToCloud(refreshed.canSyncToCloud);
     appendLog('SUCCESS', `Project saved to ${destination} storage.`);
-  }, [appendLog, currentProject, projectId, scene, script]);
+  }, [appendLog, currentProject, projectId, projectSettings, scene, script]);
 
   const handleExportPng = useCallback(async () => {
     const blob = await viewportRef.current?.captureScreenshot();
@@ -248,13 +271,9 @@ export default function EditorPage() {
 
     // 2. Cloud upload — non-fatal; errors are surfaced as warnings
     try {
-      const token = getAuthToken();
       const res = await fetch(`/api/vtr/${projectId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/octet-stream' },
         body: plainBuffer,
       });
       if (res.ok) {
@@ -313,6 +332,10 @@ export default function EditorPage() {
     [appendLog, updateBuffer]
   );
 
+  const handleToggleAutosave = useCallback(() => {
+    setProjectSettings((prev) => ({ ...prev, autosaveEnabled: !prev.autosaveEnabled }));
+  }, []);
+
   const handleEngineTransformChange = useCallback(
     (
       id: number,
@@ -364,6 +387,9 @@ export default function EditorPage() {
             onPlayEngine={handlePlayEngine}
             onToggleEditorMode={toggleEditorMode}
             onSpawnGeometry={spawnGeometry}
+            autosaveState={autosaveState}
+            autosaveEnabled={projectSettings.autosaveEnabled}
+            onToggleAutosave={handleToggleAutosave}
           />
         }
         leftSidebar={<SceneTree />}

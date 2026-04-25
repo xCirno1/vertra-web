@@ -3,11 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Cloud, CloudOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { hasCloudSession } from '@/lib/storage/project-storage';
 import { Logo } from '@/components/ui/logo';
-import { Badge } from '@/components/ui/badge';
 
 interface AppFrameProps {
   children: React.ReactNode;
@@ -78,21 +76,6 @@ export default function AppFrame({ children }: AppFrameProps) {
                 </Link>
               );
             })}
-
-            {/* Auth status pill */}
-            <Badge className="ml-2">
-              {isAuthenticated ? (
-                <>
-                  <Cloud className="h-3 w-3 text-vertra-teal" />
-                  Cloud
-                </>
-              ) : (
-                <>
-                  <CloudOff className="h-3 w-3" />
-                  Guest
-                </>
-              )}
-            </Badge>
           </nav>
         </div>
       </motion.header>

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const API_BASE = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const TOKEN_COOKIE = 'vertra-token';
+
+function authHeader(req: NextRequest): Record<string, string> {
+  const token = req.cookies.get(TOKEN_COOKIE)?.value;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
  * GET /api/projects/[id]/script
@@ -11,11 +17,10 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const authHeader = request.headers.get('Authorization');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...authHeader(request),
   };
-  if (authHeader) headers['Authorization'] = authHeader;
 
   const res = await fetch(`${API_BASE}/projects/${params.id}`, { headers });
 
@@ -40,11 +45,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const authHeader = request.headers.get('Authorization');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...authHeader(request),
   };
-  if (authHeader) headers['Authorization'] = authHeader;
 
   let body: { script?: unknown };
   try {

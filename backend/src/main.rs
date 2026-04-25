@@ -7,6 +7,7 @@ use aws_sdk_s3::{
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod config;
@@ -78,7 +79,9 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let app: Router = routes::create_router(state).layer(cors);
+    let app: Router = routes::create_router(state)
+        .layer(TraceLayer::new_for_http())
+        .layer(cors);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!("Vertra backend listening on http://{}", addr);

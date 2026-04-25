@@ -21,8 +21,14 @@ import {
   Circle,
   Square,
   Triangle,
+  PanelLeft,
+  PanelRight,
+  PanelBottom,
+  Eye,
+  Check,
+  Cloud,
 } from 'lucide-react';
-import { EngineState, GeometryType } from '@/hooks/useVertraEngine';
+import { AutosaveState, EngineState, GeometryType } from '@/hooks/useVertraEngine';
 import { useSceneStore } from '@/stores/sceneStore';
 import { useUIStore } from '@/stores/uiStore';
 import { SelectionMode } from '@/types/scene';
@@ -40,6 +46,9 @@ interface ToolbarProps {
   onPlayEngine: () => void;
   onToggleEditorMode?: () => void;
   onSpawnGeometry?: (type: GeometryType) => void;
+  autosaveState?: AutosaveState;
+  autosaveEnabled?: boolean;
+  onToggleAutosave?: () => void;
 }
 
 type BusyAction = 'save' | 'png' | 'sync' | 'save-vtr' | null;
@@ -64,15 +73,32 @@ export default function Toolbar({
   onPlayEngine,
   onToggleEditorMode,
   onSpawnGeometry,
+  autosaveState = 'idle',
+  autosaveEnabled = true,
+  onToggleAutosave,
 }: ToolbarProps) {
-  const { addEntity, currentProject } = useSceneStore();
-  const { activeTool, setActiveTool } = useUIStore();
+  const { addEntity, currentProject, setCurrentProject } = useSceneStore();
+  const {
+    activeTool,
+    setActiveTool,
+    sidebarOpen,
+    toggleSidebar,
+    inspectorOpen,
+    toggleInspector,
+    bottomPanelOpen,
+    toggleBottomPanel,
+  } = useUIStore();
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [geoMenuOpen, setGeoMenuOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [isRenamingProject, setIsRenamingProject] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
 
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const geoMenuRef = useRef<HTMLDivElement>(null);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const vtrInputRef = useRef<HTMLInputElement>(null);
 
   // Close file dropdown on outside click
@@ -98,6 +124,42 @@ export default function Toolbar({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [geoMenuOpen]);
+
+  // Close view dropdown on outside click
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
+        setViewMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [viewMenuOpen]);
+
+  // Focus rename input when it appears
+  useEffect(() => {
+    if (isRenamingProject) {
+      renameInputRef.current?.select();
+    }
+  }, [isRenamingProject]);
+
+  const startRename = () => {
+    if (!currentProject) return;
+    setRenameValue(currentProject.name);
+    setIsRenamingProject(true);
+  };
+
+  const commitRename = () => {
+    if (currentProject && renameValue.trim()) {
+      setCurrentProject({ ...currentProject, name: renameValue.trim() });
+    }
+    setIsRenamingProject(false);
+  };
+
+  const cancelRename = () => {
+    setIsRenamingProject(false);
+  };
 
   const tools: Array<{
     id: Exclude<SelectionMode, 'none'>;
@@ -257,14 +319,115 @@ export default function Toolbar({
         </Button>
       )}
 
-      {/* Project name — center */}
-      <div className="flex flex-1 items-center justify-center">
-        {currentProject?.name && (
-          <span className="max-w-50 truncate text-xs text-vertra-text-dim">
-            {currentProject.name}
-          </span>
+      {/* Project name + autosave indicator — center */}
+      <div className="flex flex-1 items-center justify-center gap-2">
+        {currentProject && (
+          isRenamingProject ? (
+            <div className="flex items-center gap-1">
+              <input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') cancelRename();
+                }}
+                className="max-w-48 rounded bg-vertra-surface border border-vertra-cyan/50 px-2 py-0.5 text-xs text-vertra-text outline-none focus:ring-1 focus:ring-vertra-cyan/60"
+              />
+              <button
+                onMouseDown={(e) => { e.preventDefault(); commitRename(); }}
+                className="text-vertra-cyan hover:text-vertra-cyan/80"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startRename}
+              title="Click to rename project"
+              className="max-w-50 truncate text-xs text-vertra-text-dim hover:text-vertra-text transition-colors cursor-text px-1 rounded hover:bg-vertra-surface/60"
+            >
+              {currentProject.name}
+            </button>
+          )
         )}
+        {/* Autosave status pill */}
+        <AnimatePresence mode="wait">
+          {autosaveState === 'saving' && (
+            <motion.span
+              key="saving"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="flex items-center gap-1 text-[10px] text-vertra-text-dim"
+            >
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              Saving...
+            </motion.span>
+          )}
+          {autosaveState === 'saved' && (
+            <motion.span
+              key="saved"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="flex items-center gap-1 text-[10px] text-vertra-cyan/70"
+            >
+              <Cloud className="w-2.5 h-2.5" />
+              Saved
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
+
+      {/* View dropdown */}
+      <div ref={viewMenuRef} className="relative">
+        <Button
+          variant="ghost"
+          size="sm"
+          active={viewMenuOpen}
+          onClick={() => setViewMenuOpen((v) => !v)}
+          title="View options"
+        >
+          <Eye className="w-3.5 h-3.5" />
+          <span>View</span>
+          <ChevronDown className="w-3 h-3 opacity-60" />
+        </Button>
+
+        <AnimatePresence>
+          {viewMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -4, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.97 }}
+              transition={{ duration: 0.1 }}
+              className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-vertra-border/40 bg-vertra-surface/95 backdrop-blur shadow-xl z-50 py-1"
+            >
+              <DropdownToggleItem
+                icon={<PanelLeft className="w-3.5 h-3.5" />}
+                label="Left Panel"
+                checked={sidebarOpen}
+                onClick={toggleSidebar}
+              />
+              <DropdownToggleItem
+                icon={<PanelBottom className="w-3.5 h-3.5" />}
+                label="Bottom Panel"
+                checked={bottomPanelOpen}
+                onClick={toggleBottomPanel}
+              />
+              <DropdownToggleItem
+                icon={<PanelRight className="w-3.5 h-3.5" />}
+                label="Right Panel"
+                checked={inspectorOpen}
+                onClick={toggleInspector}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="mx-1 h-5 w-px bg-vertra-border/40" />
 
       {/* File dropdown */}
       <div ref={fileMenuRef} className="relative">
@@ -343,6 +506,18 @@ export default function Toolbar({
                   vtrInputRef.current?.click();
                 }}
               />
+
+              {onToggleAutosave && (
+                <>
+                  <DropdownDivider />
+                  <DropdownToggleItem
+                    icon={<Cloud className="w-3.5 h-3.5" />}
+                    label="Enable Autosave"
+                    checked={autosaveEnabled}
+                    onClick={() => { setFileMenuOpen(false); onToggleAutosave(); }}
+                  />
+                </>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -393,4 +568,27 @@ function DropdownItem({ icon, label, hint, disabled, disabledHint, onClick }: Dr
 
 function DropdownDivider() {
   return <div className="my-1 h-px bg-vertra-border/30" />;
+}
+
+interface DropdownToggleItemProps {
+  icon: React.ReactNode;
+  label: string;
+  checked: boolean;
+  onClick: () => void;
+}
+
+function DropdownToggleItem({ icon, label, checked, onClick }: DropdownToggleItemProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-1.5 text-xs text-vertra-text hover:bg-vertra-surface-alt/60 transition-colors"
+    >
+      <span className="text-vertra-text-dim">{icon}</span>
+      <span className="flex-1 text-left">{label}</span>
+      <span className={checked ? 'text-vertra-cyan' : 'text-vertra-text-dim/30'}>
+        <Check className="w-3 h-3" />
+      </span>
+    </button>
+  );
 }

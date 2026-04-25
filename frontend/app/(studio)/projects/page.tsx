@@ -131,9 +131,9 @@ export default function ProjectsPage() {
               {/* Source badge */}
               <Badge variant="accent">
                 {source === 'cloud' ? (
-                  <><Cloud className="h-3 w-3 text-vertra-teal" /> Supabase</>
+                  <><Cloud className="h-3 w-3 text-vertra-teal" /> Synced</>
                 ) : (
-                  <><HardDrive className="h-3 w-3" /> Local</>
+                  <><HardDrive className="h-3 w-3" /> Offline</>
                 )}
               </Badge>
 

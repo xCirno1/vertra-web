@@ -8,9 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Divider } from '@/components/ui/divider';
 import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
-import { setAuthToken } from '@/lib/storage/project-storage';
 
-const API_BASE = 'http://localhost:8080';
 
 type Mode = 'login' | 'register';
 
@@ -43,13 +41,13 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
+      const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
       const body =
         mode === 'login'
           ? { email, password }
           : { email, password, name: name.trim() || undefined };
 
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -66,8 +64,6 @@ export default function LoginPage() {
         return;
       }
 
-      const data = (await res.json()) as { token: string };
-      setAuthToken(data.token);
       router.push('/projects');
     } catch {
       setError('Unable to reach the server. Please try again.');
