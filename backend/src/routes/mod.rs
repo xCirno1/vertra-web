@@ -5,6 +5,7 @@ use crate::state::AppState;
 
 pub mod auth;
 pub mod projects;
+pub mod textures;
 pub mod vtr;
 
 /// Build the main application router with all named sub-routers attached.
@@ -30,6 +31,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/vtr/:project_id",
             axum::routing::put(vtr::upload_vtr).get(vtr::download_vtr),
         )
+        // Texture endpoints
+        .route(
+            "/textures/upload",
+            axum::routing::post(textures::upload_texture)
+                .layer(axum::extract::DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
+        .route("/textures", get(textures::list_textures))
+        .route("/textures/:id/url", get(textures::get_texture_url))
+        .route("/textures/:id", axum::routing::delete(textures::delete_texture))
         .with_state(state)
 }
 

@@ -20,10 +20,12 @@ interface ViewportProps {
   engineError: string | null;
   isEditorMode?: boolean;
   sendEditorEvent?: (payload: EditorEventPayload) => void;
+  /** Called when a texture is dragged from the library and dropped onto the viewport */
+  onTextureDrop?: (textureId: string) => void;
 }
 
 const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewport(
-  { isEngineReady, isEngineLoading, entityCount, engineState, engineError, isEditorMode, sendEditorEvent },
+  { isEngineReady, isEngineLoading, entityCount, engineState, engineError, isEditorMode, sendEditorEvent, onTextureDrop },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -118,6 +120,16 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewport(
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden bg-linear-to-br from-vertra-bg via-vertra-surface-alt to-vertra-bg"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('texture-id')) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const textureId = e.dataTransfer.getData('texture-id');
+        if (textureId && onTextureDrop) {
+          e.preventDefault();
+          onTextureDrop(textureId);
+        }
+      }}
     >
       {/* ── R3F edit-mode canvas (hidden while engine is running) ── */}
       <div

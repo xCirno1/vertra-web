@@ -9,6 +9,7 @@ import Viewport, { ViewportHandle } from '@/components/studio/Viewport';
 import Toolbar from '@/components/studio/toolbar/Toolbar';
 import Inspector from '@/components/studio/inspector/Inspector';
 import BottomPanel from '@/components/studio/bottom-panel/BottomPanel';
+import TexturePanel from '@/components/studio/textures/TexturePanel';
 import { useSceneStore } from '@/stores/sceneStore';
 import { BufferPatch, useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
@@ -25,6 +26,7 @@ import {
   type ProjectSource,
 } from '@/lib/storage/project-storage';
 import { Skeleton } from '@/components/ui/skeleton';
+import type { TextureMeta } from '@/types/texture';
 
 type LogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
 
@@ -84,6 +86,7 @@ export default function EditorPage() {
     sendEditorEvent,
     applyTransformToEngine,
     updateEngineObjectProps,
+    applyTextureToEngine,
     spawnGeometry,
     deleteEngineObject,
     reparentEngineObject,
@@ -92,6 +95,33 @@ export default function EditorPage() {
     autosaveEnabled: projectSettings.autosaveEnabled,
     onAutosaveError: (reason) => appendLog('WARN', `Autosave failed: ${reason}`),
   });
+
+  // ── Textures ──────────────────────────────────────────────────────────────
+  const [availableTextures, setAvailableTextures] = useState<TextureMeta[]>([]);
+  const [texturePanelOpen, setTexturePanelOpen] = useState(true);
+
+  const fetchTextures = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/textures?project_id=${projectId}`);
+      if (res.ok) {
+        const data = (await res.json()) as TextureMeta[];
+        setAvailableTextures(data);
+      }
+    } catch {
+      // silently fail
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void fetchTextures();
+  }, [fetchTextures]);
+
+  const handleApplyTexture = useCallback(
+    async (objectId: number, textureId: string) => {
+      await applyTextureToEngine(objectId, textureId);
+    },
+    [applyTextureToEngine],
+  );
 
   const viewportRef = useRef<ViewportHandle>(null);
   const didLogEngineLoading = useRef(false);
@@ -409,10 +439,22 @@ export default function EditorPage() {
           />
         }
         leftSidebar={
-          <SceneTree
-            onDeleteEntity={deleteEngineObject}
-            onReparentEntity={reparentEngineObject}
-          />
+          <>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <SceneTree
+                onDeleteEntity={deleteEngineObject}
+                onReparentEntity={reparentEngineObject}
+              />
+            </div>
+            {texturePanelOpen && (
+              <TexturePanel
+                projectId={projectId}
+                selectedObjectId={engineSelectedObject?.id}
+                onApplyTexture={handleApplyTexture}
+                onClose={() => setTexturePanelOpen(false)}
+              />
+            )}
+          </>
         }
         centerViewport={
           <Viewport
@@ -424,6 +466,12 @@ export default function EditorPage() {
             engineError={vertraEngineError}
             isEditorMode={engineMode === 'editor'}
             sendEditorEvent={sendEditorEvent}
+            onTextureDrop={(textureId) => {
+              const selectedId = engineSelectedObject?.id;
+              if (selectedId !== undefined) {
+                void handleApplyTexture(selectedId, textureId);
+              }
+            }}
           />
         }
         rightSidebar={
@@ -434,6 +482,8 @@ export default function EditorPage() {
             engineSelectedObject={engineSelectedObject}
             onEngineTransformChange={handleEngineTransformChange}
             onEngineObjectPropsChange={handleEngineObjectPropsChange}
+            availableTextures={availableTextures}
+            onApplyTexture={handleApplyTexture}
           />
         }
         bottomPanel={

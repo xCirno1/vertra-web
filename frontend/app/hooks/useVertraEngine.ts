@@ -15,6 +15,8 @@ export interface EngineObjectProps {
   name?: string;
   strId?: string;
   color?: [number, number, number, number];
+  /** Set to a texture ID to apply that texture; null/undefined to remove */
+  texturePath?: string | null;
 }
 
 interface UseVertraEngineReturn {
@@ -36,6 +38,11 @@ interface UseVertraEngineReturn {
     scale: [number, number, number],
   ) => void;
   updateEngineObjectProps: (id: number, props: EngineObjectProps) => void;
+  /**
+   * Fetch a texture from R2 by its ID, decode it to RGBA pixels, upload it
+   * to the engine, and apply it to the specified object.
+   */
+  applyTextureToEngine: (objectId: number, textureId: string) => Promise<void>;
   spawnGeometry: (type: GeometryType, name?: string) => number | null;
   deleteEngineObject: (id: number) => void;
   reparentEngineObject: (id: number, newParentId: number | null) => void;
@@ -525,6 +532,9 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     if (props.color !== undefined) {
       obj.set_color(new Float32Array(props.color));
     }
+    if ('texturePath' in props) {
+      obj.texture_path = props.texturePath ?? null;
+    }
 
     // Refresh inspector snapshot only when name or strId changed — those affect
     // the display header. Color changes don't need a snapshot refresh.
@@ -532,6 +542,65 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
       const inspectorData = scene.editor.inspector() as InspectorData | undefined;
       setEngineSelectedObject(inspectorData);
     }
+    triggerVtrAutosave();
+  }, [triggerVtrAutosave]);
+
+  /**
+   * Fetch a texture from the API, decode it to raw RGBA pixels, register it
+   * with the engine via `scene.load_texture_from_rgba`, then point the object
+   * at that texture key.
+   */
+  const applyTextureToEngine = useCallback(async (
+    objectId: number,
+    textureId: string,
+  ): Promise<void> => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    // 1. Get a presigned download URL from the API.
+    const urlRes = await fetch(`/api/textures/${textureId}`);
+    if (!urlRes.ok) {
+      console.error(`[Vertra] Failed to fetch texture URL for ${textureId}: ${urlRes.status}`);
+      return;
+    }
+    const { url } = (await urlRes.json()) as { url: string };
+
+    // 2. Fetch the image and decode to RGBA pixels via OffscreenCanvas.
+    const imgRes = await fetch(url);
+    if (!imgRes.ok) {
+      console.error(`[Vertra] Failed to fetch texture image from R2: ${imgRes.status}`);
+      return;
+    }
+    const blob = await imgRes.blob();
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(blob);
+    } catch (err) {
+      console.error('[Vertra] createImageBitmap failed:', err);
+      return;
+    }
+
+    const { width, height } = bitmap;
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bitmap.close();
+      console.error('[Vertra] OffscreenCanvas 2d context unavailable');
+      return;
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const imageData = ctx.getImageData(0, 0, width, height);
+
+    // 3. Upload to the engine using the texture ID as the path key.
+    scene.load_texture_from_rgba(textureId, width, height, new Uint8Array(imageData.data.buffer));
+
+    // 4. Point the object at the texture.
+    const obj = scene.world.get_object(objectId);
+    if (obj) {
+      obj.texture_path = textureId;
+    }
+
     triggerVtrAutosave();
   }, [triggerVtrAutosave]);
 
@@ -590,6 +659,7 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     sendEditorEvent,
     applyTransformToEngine,
     updateEngineObjectProps,
+    applyTextureToEngine,
     spawnGeometry,
     deleteEngineObject,
     reparentEngineObject,

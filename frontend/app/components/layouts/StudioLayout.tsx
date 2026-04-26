@@ -136,7 +136,7 @@ export default function StudioLayout({
               className="relative shrink-0 bg-vertra-surface/80 border-r border-vertra-border/40 overflow-hidden flex flex-col"
               style={{ width: sidebarWidth }}
             >
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 {leftSidebar}
               </div>
               {/* Right-edge resize handle */}

@@ -11,6 +11,7 @@ import type { EngineObjectProps } from '@/hooks/useVertraEngine';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { PanelHeader } from '@/components/ui/panel-header';
+import type { TextureMeta } from '@/types/texture';
 
 interface InspectorProps {
   onBufferPatch?: (patch: BufferPatch) => Promise<void> | void;
@@ -24,6 +25,10 @@ interface InspectorProps {
     scale: [number, number, number],
   ) => void;
   onEngineObjectPropsChange?: (id: number, props: EngineObjectProps) => void;
+  /** List of available textures for the picker. */
+  availableTextures?: TextureMeta[];
+  /** Called when user applies a texture to the selected object. */
+  onApplyTexture?: (objectId: number, textureId: string) => Promise<void>;
 }
 
 const AXES: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z'];
@@ -40,6 +45,8 @@ export default function Inspector({
   engineSelectedObject,
   onEngineTransformChange,
   onEngineObjectPropsChange,
+  availableTextures = [],
+  onApplyTexture,
 }: InspectorProps) {
   const {
     selectedEntityId,
@@ -60,6 +67,7 @@ export default function Inspector({
   const [engineName, setEngineName] = useState('');
   const [engineStrId, setEngineStrId] = useState('');
   const [engineColor, setEngineColor] = useState<[number, number, number, number]>([1, 1, 1, 1]);
+  const [engineTextureId, setEngineTextureId] = useState<string>('');
   const prevEngineObjIdRef = useRef<number | undefined>(undefined);
 
   // Sync local state when engineSelectedObject changes.
@@ -76,6 +84,7 @@ export default function Inspector({
       prevEngineObjIdRef.current = engineSelectedObject.id;
       setEngineName(engineSelectedObject.name);
       setEngineStrId(engineSelectedObject.str_id);
+      setEngineTextureId('');
     }
   }, [engineSelectedObject]);
 
@@ -343,6 +352,48 @@ export default function Inspector({
                 </div>
               </div>
             </div>
+
+            {/* Texture */}
+            {availableTextures.length > 0 && (
+              <div>
+                <label className="block text-xs text-vertra-text-dim mb-1">Texture</label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={engineTextureId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setEngineTextureId(id);
+                      if (id && onApplyTexture) {
+                        void onApplyTexture(engineSelectedObject.id, id);
+                      } else if (!id) {
+                        onEngineObjectPropsChange?.(engineSelectedObject.id, { texturePath: null });
+                      }
+                    }}
+                    className="flex-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
+                  >
+                    <option value="">None</option>
+                    {availableTextures.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{t.width && t.height ? ` (${t.width}\u00d7${t.height})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {engineTextureId && (
+                    <Button
+                      variant="icon"
+                      size="sm"
+                      title="Remove texture"
+                      onClick={() => {
+                        setEngineTextureId('');
+                        onEngineObjectPropsChange?.(engineSelectedObject.id, { texturePath: null });
+                      }}
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Read-only info */}
             <div className="pt-1 border-t border-vertra-border/30 space-y-1 text-xs text-vertra-text-dim">

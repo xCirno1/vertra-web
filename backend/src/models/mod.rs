@@ -147,3 +147,59 @@ pub struct SyncProjectsResponse {
 pub struct OkResponse {
     pub ok: bool,
 }
+
+// ─── Texture models ──────────────────────────────────────────────────────────
+
+/// Row returned from the `textures` table.
+#[derive(Debug, sqlx::FromRow)]
+pub struct TextureRow {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+    pub project_id: Option<Uuid>,
+    pub name: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub r2_key: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Public-facing texture metadata returned by the API.
+#[derive(Debug, Serialize)]
+pub struct TextureDto {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+    pub project_id: Option<Uuid>,
+    pub name: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<TextureRow> for TextureDto {
+    fn from(row: TextureRow) -> Self {
+        Self {
+            id: row.id,
+            owner_id: row.owner_id,
+            project_id: row.project_id,
+            name: row.name,
+            file_name: row.file_name,
+            mime_type: row.mime_type,
+            size_bytes: row.size_bytes,
+            width: row.width,
+            height: row.height,
+            created_at: row.created_at,
+        }
+    }
+}
+
+/// Response body for a presigned R2 download URL.
+#[derive(Debug, Serialize)]
+pub struct PresignedUrlResponse {
+    pub url: String,
+}
