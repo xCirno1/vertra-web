@@ -4,13 +4,21 @@ import { useMemo, useState } from 'react';
 import { useSceneStore } from '@/stores/sceneStore';
 import { useUIStore } from '@/stores/uiStore';
 import { motion } from 'framer-motion';
-import { ChevronRight, Box, Lightbulb, Camera, X } from 'lucide-react';
+import { ChevronRight, Box, Lightbulb, Camera, X, Trash2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PanelHeader } from '@/components/ui/panel-header';
 import { Button } from '@/components/ui/button';
 import type { DragEvent } from 'react';
 
-export default function SceneTree() {
+/** ENGINE_ROOT_ID matches the constant in useVertraEngine — entities at this ID are scene roots. */
+const ENGINE_ROOT_ID = 'engine-world-root';
+
+interface SceneTreeProps {
+  onDeleteEntity?: (engineId: number) => void;
+  onReparentEntity?: (engineId: number, newParentEngineId: number | null) => void;
+}
+
+export default function SceneTree({ onDeleteEntity, onReparentEntity }: SceneTreeProps) {
   const { scene, selectedEntityId, selectEntity, reparentEntity } = useSceneStore();
   const { toggleSidebar } = useUIStore();
   const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null);
@@ -114,12 +122,23 @@ export default function SceneTree() {
                 return;
               }
 
-              reparentEntity(droppedEntityId as string, entityId);
-              selectEntity(droppedEntityId);
+              // Update engine world hierarchy first.
+              if (onReparentEntity && droppedEntityId) {
+                const sourceEngineId = parseInt(droppedEntityId, 10);
+                const targetEngineId = entityId === ENGINE_ROOT_ID ? null : parseInt(entityId, 10);
+                if (!isNaN(sourceEngineId)) {
+                  onReparentEntity(sourceEngineId, targetEngineId);
+                }
+              } else {
+                // Fallback: React-store-only reparent (no engine running).
+                reparentEntity(droppedEntityId as string, entityId);
+                selectEntity(droppedEntityId);
+              }
+
               setDraggedEntityId(null);
               setDropTargetId(null);
             }}
-            className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors ${isSelected
+            className={`group flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors ${isSelected
               ? 'bg-vertra-cyan/15 text-vertra-text'
               : 'hover:bg-vertra-surface hover:text-vertra-text'
               } ${dropTargetId === entityId ? 'ring-1 ring-inset ring-vertra-cyan' : ''}`}
@@ -127,7 +146,21 @@ export default function SceneTree() {
           >
             {!hasChildren && <div className="w-3" />}
             <span className={entityColor}>{entityIcon}</span>
-            <span className="text-xs truncate">{entity.name}</span>
+            <span className="text-xs truncate flex-1">{entity.name}</span>
+            {onDeleteEntity && entityId !== scene.root.id && (
+              <button
+                type="button"
+                title="Delete object"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const engineId = parseInt(entityId, 10);
+                  if (!isNaN(engineId)) onDeleteEntity(engineId);
+                }}
+                className="ml-auto opacity-0 group-hover:opacity-100 text-vertra-text-dim hover:text-red-400 transition-all p-0.5 rounded"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </motion.div>
 

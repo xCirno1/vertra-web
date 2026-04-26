@@ -12,6 +12,7 @@ import BottomPanel from '@/components/studio/bottom-panel/BottomPanel';
 import { useSceneStore } from '@/stores/sceneStore';
 import { BufferPatch, useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
+import type { EngineObjectProps } from '@/hooks/useVertraEngine';
 import { DEFAULT_ENGINE_SCRIPT } from '@/lib/constants/defaultScript';
 import {
   createProjectDraft,
@@ -48,7 +49,6 @@ export default function EditorPage() {
   const projectId = typeof params?.id === 'string' ? params.id : '1';
   const {
     scene,
-    addEntity,
     currentProject,
     setCurrentProject,
   } = useSceneStore();
@@ -83,7 +83,10 @@ export default function EditorPage() {
     toggleEditorMode,
     sendEditorEvent,
     applyTransformToEngine,
+    updateEngineObjectProps,
     spawnGeometry,
+    deleteEngineObject,
+    reparentEngineObject,
   } = useVertraEngine({
     projectId,
     autosaveEnabled: projectSettings.autosaveEnabled,
@@ -140,21 +143,6 @@ export default function EditorPage() {
       mounted = false;
     };
   }, [appendLog, projectId, setCurrentProject]);
-
-  useEffect(() => {
-    if (isProjectLoading) {
-      return;
-    }
-
-    if (scene.root.children.length > 0) {
-      return;
-    }
-
-    addEntity('mesh', scene.root.id, 'Cube');
-    addEntity('light', scene.root.id, 'Key Light');
-    addEntity('camera', scene.root.id, 'Camera');
-    appendLog('INFO', 'Initialized default entities for empty scene.');
-  }, [addEntity, appendLog, isProjectLoading, scene.root.children.length, scene.root.id]);
 
   useEffect(() => {
     if (isEngineLoading && !didLogEngineLoading.current) {
@@ -348,6 +336,33 @@ export default function EditorPage() {
     [applyTransformToEngine]
   );
 
+  const handleRenameProject = useCallback(
+    async (name: string) => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+          credentials: 'same-origin',
+        });
+        if (!res.ok) {
+          appendLog('WARN', `Rename failed: HTTP ${res.status}`);
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        appendLog('WARN', `Rename failed: ${reason}`);
+      }
+    },
+    [appendLog, projectId]
+  );
+
+  const handleEngineObjectPropsChange = useCallback(
+    (id: number, props: EngineObjectProps) => {
+      updateEngineObjectProps(id, props);
+    },
+    [updateEngineObjectProps]
+  );
+
   if (isProjectLoading) {
     return (
       <motion.div
@@ -390,9 +405,15 @@ export default function EditorPage() {
             autosaveState={autosaveState}
             autosaveEnabled={projectSettings.autosaveEnabled}
             onToggleAutosave={handleToggleAutosave}
+            onRenameProject={handleRenameProject}
           />
         }
-        leftSidebar={<SceneTree />}
+        leftSidebar={
+          <SceneTree
+            onDeleteEntity={deleteEngineObject}
+            onReparentEntity={reparentEngineObject}
+          />
+        }
         centerViewport={
           <Viewport
             ref={viewportRef}
@@ -412,6 +433,7 @@ export default function EditorPage() {
             engineLoading={isEngineLoading}
             engineSelectedObject={engineSelectedObject}
             onEngineTransformChange={handleEngineTransformChange}
+            onEngineObjectPropsChange={handleEngineObjectPropsChange}
           />
         }
         bottomPanel={

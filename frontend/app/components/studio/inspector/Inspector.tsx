@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSceneStore } from '@/stores/sceneStore';
 import { useUIStore } from '@/stores/uiStore';
 import { motion } from 'framer-motion';
 import { Box, Copy, Trash2, X } from 'lucide-react';
 import { BufferPatch } from '@/hooks/useVertra';
 import type { InspectorData } from '@/hooks/useVertraEngine';
+import type { EngineObjectProps } from '@/hooks/useVertraEngine';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { PanelHeader } from '@/components/ui/panel-header';
@@ -22,6 +23,7 @@ interface InspectorProps {
     rotation: [number, number, number],
     scale: [number, number, number],
   ) => void;
+  onEngineObjectPropsChange?: (id: number, props: EngineObjectProps) => void;
 }
 
 const AXES: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z'];
@@ -34,10 +36,10 @@ const AXIS_COLORS: Record<'x' | 'y' | 'z', string> = {
 
 export default function Inspector({
   onBufferPatch,
-  engineReady = false,
   engineLoading = false,
   engineSelectedObject,
   onEngineTransformChange,
+  onEngineObjectPropsChange,
 }: InspectorProps) {
   const {
     selectedEntityId,
@@ -54,13 +56,26 @@ export default function Inspector({
   const [enginePos, setEnginePos] = useState<[number, number, number]>([0, 0, 0]);
   const [engineRot, setEngineRot] = useState<[number, number, number]>([0, 0, 0]);
   const [engineScale, setEngineScale] = useState<[number, number, number]>([1, 1, 1]);
+  // Local editable state for object properties
+  const [engineName, setEngineName] = useState('');
+  const [engineStrId, setEngineStrId] = useState('');
+  const [engineColor, setEngineColor] = useState<[number, number, number, number]>([1, 1, 1, 1]);
+  const prevEngineObjIdRef = useRef<number | undefined>(undefined);
 
-  // Sync local state when a new engine object is selected
+  // Sync local state when engineSelectedObject changes.
+  // Transforms and color always sync (gizmo drags update them externally).
+  // Name and str_id only sync when switching to a different object — otherwise
+  // committing a rename would immediately revert the input via the snapshot refresh.
   useEffect(() => {
-    if (engineSelectedObject) {
-      setEnginePos([...engineSelectedObject.position] as [number, number, number]);
-      setEngineRot([...engineSelectedObject.rotation_deg] as [number, number, number]);
-      setEngineScale([...engineSelectedObject.scale] as [number, number, number]);
+    if (!engineSelectedObject) return;
+    setEnginePos([...engineSelectedObject.position] as [number, number, number]);
+    setEngineRot([...engineSelectedObject.rotation_deg] as [number, number, number]);
+    setEngineScale([...engineSelectedObject.scale] as [number, number, number]);
+    setEngineColor([...engineSelectedObject.color] as [number, number, number, number]);
+    if (engineSelectedObject.id !== prevEngineObjIdRef.current) {
+      prevEngineObjIdRef.current = engineSelectedObject.id;
+      setEngineName(engineSelectedObject.name);
+      setEngineStrId(engineSelectedObject.str_id);
     }
   }, [engineSelectedObject]);
 
@@ -118,14 +133,12 @@ export default function Inspector({
     { label: 'z', idx: 2 },
   ];
 
-  const updateEngineAxis = (
+  const commitEngineAxis = (
     channel: 'position' | 'rotation' | 'scale',
     idx: 0 | 1 | 2,
-    rawValue: string,
+    v: number,
   ) => {
     if (!engineSelectedObject) return;
-    const v = Number(rawValue);
-    if (Number.isNaN(v)) return;
 
     const newPos: [number, number, number] = [...enginePos];
     const newRot: [number, number, number] = [...engineRot];
@@ -143,6 +156,43 @@ export default function Inspector({
     }
 
     onEngineTransformChange?.(engineSelectedObject.id, newPos, newRot, newScale);
+  };
+
+  const commitEngineName = () => {
+    if (!engineSelectedObject || engineName.trim() === '') return;
+    onEngineObjectPropsChange?.(engineSelectedObject.id, { name: engineName.trim() });
+  };
+
+  const commitEngineStrId = () => {
+    if (!engineSelectedObject || engineStrId.trim() === '') return;
+    onEngineObjectPropsChange?.(engineSelectedObject.id, { strId: engineStrId.trim() });
+  };
+
+  const commitEngineColorChannel = (idx: 0 | 1 | 2 | 3, v: number) => {
+    if (!engineSelectedObject) return;
+    const clamped = Math.max(0, Math.min(1, v));
+    const newColor: [number, number, number, number] = [...engineColor];
+    newColor[idx] = clamped;
+    setEngineColor(newColor);
+    onEngineObjectPropsChange?.(engineSelectedObject.id, { color: newColor });
+  };
+
+  const updateEngineColorFromPicker = (hex: string) => {
+    if (!engineSelectedObject) return;
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const newColor: [number, number, number, number] = [r, g, b, engineColor[3]];
+    setEngineColor(newColor);
+    onEngineObjectPropsChange?.(engineSelectedObject.id, { color: newColor });
+  };
+
+  const colorToHex = (r: number, g: number, b: number): string => {
+    const toHex = (v: number) =>
+      Math.round(Math.max(0, Math.min(1, v)) * 255)
+        .toString(16)
+        .padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
   };
 
   // When engine has a selected object, show its data
@@ -166,7 +216,7 @@ export default function Inspector({
             className="bg-vertra-surface-alt/60 rounded-lg px-3 py-2 border border-vertra-border/40"
           >
             <p className="text-xs font-mono font-medium text-vertra-text">
-              {engineSelectedObject.name}
+              {engineName || engineSelectedObject.name}
             </p>
             <p className="text-xs text-vertra-text-dim mt-1">
               {engineSelectedObject.geometry_type ?? 'Object'} · ID {engineSelectedObject.id}
@@ -190,11 +240,9 @@ export default function Inspector({
                     <label className={`text-xs font-semibold font-mono ${AXIS_COLORS[label]}`}>
                       {label.toUpperCase()}
                     </label>
-                    <input
-                      type="number"
-                      step={0.1}
-                      value={enginePos[idx].toFixed(2)}
-                      onChange={(e) => updateEngineAxis('position', idx, e.target.value)}
+                    <NumericField
+                      value={enginePos[idx]}
+                      onCommit={(v) => commitEngineAxis('position', idx, v)}
                       className="w-full mt-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
                     />
                   </div>
@@ -211,11 +259,9 @@ export default function Inspector({
                     <label className={`text-xs font-semibold font-mono ${AXIS_COLORS[label]}`}>
                       {label.toUpperCase()}
                     </label>
-                    <input
-                      type="number"
-                      step={1}
-                      value={engineRot[idx].toFixed(1)}
-                      onChange={(e) => updateEngineAxis('rotation', idx, e.target.value)}
+                    <NumericField
+                      value={engineRot[idx]}
+                      onCommit={(v) => commitEngineAxis('rotation', idx, v)}
                       className="w-full mt-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
                     />
                   </div>
@@ -232,11 +278,9 @@ export default function Inspector({
                     <label className={`text-xs font-semibold font-mono ${AXIS_COLORS[label]}`}>
                       {label.toUpperCase()}
                     </label>
-                    <input
-                      type="number"
-                      step={0.1}
-                      value={engineScale[idx].toFixed(2)}
-                      onChange={(e) => updateEngineAxis('scale', idx, e.target.value)}
+                    <NumericField
+                      value={engineScale[idx]}
+                      onCommit={(v) => commitEngineAxis('scale', idx, v)}
                       className="w-full mt-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
                     />
                   </div>
@@ -245,58 +289,73 @@ export default function Inspector({
             </div>
           </div>
 
-          <div className="rounded-lg border border-vertra-border/40 bg-linear-to-br from-white/2 to-transparent p-3">
+          <div className="rounded-lg border border-vertra-border/40 bg-linear-to-br from-white/2 to-transparent p-3 space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-vertra-text-dim">
-              Object Details
+              Object Properties
             </h3>
-            <div className="mt-2 space-y-1.5 text-xs">
-              <p className="text-vertra-text-dim">
-                Name: <span className="text-vertra-text font-mono">{engineSelectedObject.name}</span>
+
+            {/* Name */}
+            <div>
+              <label className="block text-xs text-vertra-text-dim mb-1">Name</label>
+              <input
+                type="text"
+                value={engineName}
+                onChange={(e) => setEngineName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { commitEngineName(); (e.target as HTMLInputElement).blur(); } }}
+                className="w-full px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors font-mono"
+              />
+            </div>
+
+            {/* String ID */}
+            <div>
+              <label className="block text-xs text-vertra-text-dim mb-1">String ID</label>
+              <input
+                type="text"
+                value={engineStrId}
+                onChange={(e) => setEngineStrId(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { commitEngineStrId(); (e.target as HTMLInputElement).blur(); } }}
+                className="w-full px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors font-mono"
+              />
+            </div>
+
+            {/* Color */}
+            <div>
+              <label className="block text-xs text-vertra-text-dim mb-1">Color (RGBA)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={colorToHex(engineColor[0], engineColor[1], engineColor[2])}
+                  onChange={(e) => updateEngineColorFromPicker(e.target.value)}
+                  className="w-8 h-7 rounded cursor-pointer border border-vertra-border/40 bg-transparent"
+                  title="Pick RGB color"
+                />
+                <div className="flex-1 grid grid-cols-4 gap-1">
+                  {(['R', 'G', 'B', 'A'] as const).map((ch, idx) => (
+                    <div key={ch}>
+                      <label className="text-[10px] font-mono text-vertra-text-dim">{ch}</label>
+                      <NumericField
+                        value={engineColor[idx as 0 | 1 | 2 | 3]}
+                        onCommit={(v) => commitEngineColorChannel(idx as 0 | 1 | 2 | 3, v)}
+                        className="w-full mt-0.5 px-1 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Read-only info */}
+            <div className="pt-1 border-t border-vertra-border/30 space-y-1 text-xs text-vertra-text-dim">
+              <p>
+                Integer ID: <span className="text-vertra-text font-mono">{engineSelectedObject.id}</span>
               </p>
-              <p className="text-vertra-text-dim">
-                ID: <span className="text-vertra-text font-mono">{engineSelectedObject.id}</span>
-              </p>
-              <p className="text-vertra-text-dim">
-                String ID: <span className="text-vertra-text font-mono">{engineSelectedObject.str_id}</span>
-              </p>
-              <p className="text-vertra-text-dim">
-                Geometry: <span className="text-vertra-text font-mono">{engineSelectedObject.geometry_type ?? 'None'}</span>
-              </p>
-              <p className="text-vertra-text-dim">
-                Color RGBA:{' '}
-                <span className="text-vertra-text font-mono">
-                  [{engineSelectedObject.color[0].toFixed(3)}, {engineSelectedObject.color[1].toFixed(3)}, {engineSelectedObject.color[2].toFixed(3)}, {engineSelectedObject.color[3].toFixed(3)}]
-                </span>
-              </p>
-              <p className="text-vertra-text-dim">
-                Position:{' '}
-                <span className="text-vertra-text font-mono">
-                  [{enginePos[0].toFixed(3)}, {enginePos[1].toFixed(3)}, {enginePos[2].toFixed(3)}]
-                </span>
-              </p>
-              <p className="text-vertra-text-dim">
-                Rotation (deg):{' '}
-                <span className="text-vertra-text font-mono">
-                  [{engineRot[0].toFixed(3)}, {engineRot[1].toFixed(3)}, {engineRot[2].toFixed(3)}]
-                </span>
-              </p>
-              <p className="text-vertra-text-dim">
-                Scale:{' '}
-                <span className="text-vertra-text font-mono">
-                  [{engineScale[0].toFixed(3)}, {engineScale[1].toFixed(3)}, {engineScale[2].toFixed(3)}]
-                </span>
-              </p>
+              {engineSelectedObject.geometry_type && (
+                <p>
+                  Geometry: <span className="text-vertra-text font-mono">{engineSelectedObject.geometry_type}</span>
+                </p>
+              )}
             </div>
           </div>
-
-          {engineSelectedObject.geometry_type && (
-            <div className="rounded-lg border border-vertra-border/40 bg-linear-to-br from-white/2 to-transparent p-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-vertra-text-dim">
-                Geometry
-              </h3>
-              <p className="mt-2 text-xs text-vertra-text">{engineSelectedObject.geometry_type}</p>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -366,12 +425,6 @@ export default function Inspector({
           <p className="text-xs text-vertra-text-dim mt-1">
             {entity.type} · {entity.visible ? 'Visible' : 'Hidden'}
           </p>
-          <p className="mt-1.5 text-[10px] text-vertra-text-dim">
-            Engine:{' '}
-            <span className={engineReady ? 'text-vertra-success' : 'text-vertra-text-dim'}>
-              {engineLoading ? 'Initializing…' : engineReady ? 'Connected' : 'Offline'}
-            </span>
-          </p>
         </motion.div>
       </div>
 
@@ -398,13 +451,9 @@ export default function Inspector({
                   <label className={`text-xs font-semibold font-mono ${AXIS_COLORS[axis]}`}>
                     {axis.toUpperCase()}
                   </label>
-                  <input
-                    type="number"
-                    step={0.1}
-                    value={entity.transform.position[axis].toFixed(2)}
-                    onChange={(event) =>
-                      updateAxis('position', axis, event.target.value)
-                    }
+                  <NumericField
+                    value={entity.transform.position[axis]}
+                    onCommit={(v) => updateAxis('position', axis, String(v))}
                     className="w-full mt-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
                   />
                 </div>
@@ -421,16 +470,9 @@ export default function Inspector({
                   <label className={`text-xs font-semibold font-mono ${AXIS_COLORS[axis]}`}>
                     {axis.toUpperCase()}
                   </label>
-                  <input
-                    type="number"
-                    step={1}
-                    value={(
-                      (entity.transform.rotation[axis] * 180) /
-                      Math.PI
-                    ).toFixed(1)}
-                    onChange={(event) =>
-                      updateAxis('rotation', axis, event.target.value)
-                    }
+                  <NumericField
+                    value={(entity.transform.rotation[axis] * 180) / Math.PI}
+                    onCommit={(v) => updateAxis('rotation', axis, String(v))}
                     className="w-full mt-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
                   />
                 </div>
@@ -447,13 +489,9 @@ export default function Inspector({
                   <label className={`text-xs font-semibold font-mono ${AXIS_COLORS[axis]}`}>
                     {axis.toUpperCase()}
                   </label>
-                  <input
-                    type="number"
-                    step={0.1}
-                    value={entity.transform.scale[axis].toFixed(2)}
-                    onChange={(event) =>
-                      updateAxis('scale', axis, event.target.value)
-                    }
+                  <NumericField
+                    value={entity.transform.scale[axis]}
+                    onCommit={(v) => updateAxis('scale', axis, String(v))}
                     className="w-full mt-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none transition-colors"
                   />
                 </div>
@@ -477,5 +515,47 @@ export default function Inspector({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── NumericField ─────────────────────────────────────────────────────────────
+// Uncontrolled-style input: shows the external value only when not focused,
+// and applies the new value only on Enter or blur.
+
+interface NumericFieldProps {
+  value: number;
+  onCommit: (v: number) => void;
+  className?: string;
+}
+
+function NumericField({ value, onCommit, className }: NumericFieldProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const isFocused = draft !== null;
+
+  const commit = (raw: string) => {
+    const v = Number(raw);
+    if (!Number.isNaN(v)) onCommit(v);
+    setDraft(null);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={isFocused ? draft! : String(value)}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => setDraft(String(value))}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          commit((e.target as HTMLInputElement).value);
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === 'Escape') {
+          setDraft(null);
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className={className}
+    />
   );
 }

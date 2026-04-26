@@ -49,6 +49,7 @@ interface ToolbarProps {
   autosaveState?: AutosaveState;
   autosaveEnabled?: boolean;
   onToggleAutosave?: () => void;
+  onRenameProject?: (name: string) => Promise<void> | void;
 }
 
 type BusyAction = 'save' | 'png' | 'sync' | 'save-vtr' | null;
@@ -76,6 +77,7 @@ export default function Toolbar({
   autosaveState = 'idle',
   autosaveEnabled = true,
   onToggleAutosave,
+  onRenameProject,
 }: ToolbarProps) {
   const { addEntity, currentProject, setCurrentProject } = useSceneStore();
   const {
@@ -152,7 +154,9 @@ export default function Toolbar({
 
   const commitRename = () => {
     if (currentProject && renameValue.trim()) {
-      setCurrentProject({ ...currentProject, name: renameValue.trim() });
+      const newName = renameValue.trim();
+      setCurrentProject({ ...currentProject, name: newName });
+      void Promise.resolve(onRenameProject?.(newName));
     }
     setIsRenamingProject(false);
   };

@@ -3,11 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import init, { VertraObject, Geometry, Transform, Camera } from '../../public/engine/vertra_binder.js';
 import type { WebWindow, Scene, FrameContext, InspectorData, EditorEventPayload } from '../../public/engine/vertra_binder.js';
+import { useSceneStore } from '@/stores/sceneStore';
+import type { Entity as SceneEntity, Scene as ReactScene } from '@/types/scene';
 
 export type EngineState = 'idle' | 'loading' | 'running' | 'error';
 export type GeometryType = 'cube' | 'sphere' | 'plane' | 'box' | 'pyramid';
 export type AutosaveState = 'idle' | 'saving' | 'saved';
 export type { InspectorData, EditorEventPayload };
+
+export interface EngineObjectProps {
+  name?: string;
+  strId?: string;
+  color?: [number, number, number, number];
+}
 
 interface UseVertraEngineReturn {
   engineState: EngineState;
@@ -27,7 +35,10 @@ interface UseVertraEngineReturn {
     rotation: [number, number, number],
     scale: [number, number, number],
   ) => void;
+  updateEngineObjectProps: (id: number, props: EngineObjectProps) => void;
   spawnGeometry: (type: GeometryType, name?: string) => number | null;
+  deleteEngineObject: (id: number) => void;
+  reparentEngineObject: (id: number, newParentId: number | null) => void;
 }
 
 // Shape of the object the user script must return.
@@ -62,6 +73,115 @@ function executeUserScript(scriptBody: string): UserScriptHandlers {
     scriptBody,
   );
   return factory(VertraObject, Geometry, Transform, Camera) as UserScriptHandlers;
+}
+
+// ─── Engine → React scene sync ────────────────────────────────────────────────
+
+/**
+ * Stable root ID used for the synthetic scene-root entity in the React store.
+ * Kept constant so re-renders don't treat it as a new node.
+ */
+const ENGINE_ROOT_ID = 'engine-world-root';
+
+/** Heuristic: map an engine object name to a SceneTree display type. */
+function inferEntityType(name: string): SceneEntity['type'] {
+  const lower = name.toLowerCase();
+  if (/\blight\b|lamp|spotlight|directional|sun/.test(lower)) return 'light';
+  if (/\bcamera\b|\bcam\b/.test(lower)) return 'camera';
+  return 'mesh';
+}
+
+/** Snapshot the engine world and produce a React Scene for the store. */
+function buildReactSceneFromWorld(engineScene: Scene): ReactScene {
+  const entities = new Map<string, SceneEntity>();
+
+  const rootChildIds = Array.from(engineScene.world.get_roots()).map((id) => id.toString());
+  const root: SceneEntity = {
+    id: ENGINE_ROOT_ID,
+    name: 'Scene',
+    type: 'group',
+    children: rootChildIds,
+    transform: {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, order: 'XYZ' },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+    components: {},
+    visible: true,
+    locked: false,
+    tags: [],
+  };
+  entities.set(ENGINE_ROOT_ID, root);
+
+  function addObject(id: number): void {
+    const obj = engineScene.world.get_object(id);
+    if (!obj) return;
+
+    const strId = id.toString();
+    const t = obj.transform;
+    const pos = t.position;
+    const rot = t.rotation;
+    const sc = t.scale;
+    const childIds = Array.from(obj.children).map((cid) => cid.toString());
+    const parentStrId = obj.parent !== undefined ? obj.parent.toString() : ENGINE_ROOT_ID;
+
+    entities.set(strId, {
+      id: strId,
+      name: obj.name,
+      type: inferEntityType(obj.name),
+      parentId: parentStrId,
+      children: childIds,
+      transform: {
+        position: { x: pos[0], y: pos[1], z: pos[2] },
+        rotation: { x: rot[0], y: rot[1], z: rot[2], order: 'XYZ' },
+        scale: { x: sc[0], y: sc[1], z: sc[2] },
+      },
+      components: {},
+      visible: true,
+      locked: false,
+      tags: [],
+    });
+
+    for (const childId of obj.children) {
+      addObject(childId);
+    }
+  }
+
+  for (const rootId of engineScene.world.get_roots()) {
+    addObject(rootId);
+  }
+
+  return {
+    version: '2024-1',
+    root,
+    entities,
+    metadata: { gridSize: 1.0, backgroundColor: '#0a0a0c', renderScale: 1.0 },
+  };
+}
+
+/** Empty React scene shown when no engine is running. */
+function createEmptyReactScene(): ReactScene {
+  const root: SceneEntity = {
+    id: ENGINE_ROOT_ID,
+    name: 'Scene',
+    type: 'group',
+    children: [],
+    transform: {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, order: 'XYZ' },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+    components: {},
+    visible: true,
+    locked: false,
+    tags: [],
+  };
+  return {
+    version: '2024-1',
+    root,
+    entities: new Map([[ENGINE_ROOT_ID, root]]),
+    metadata: { gridSize: 1.0, backgroundColor: '#0a0a0c', renderScale: 1.0 },
+  };
 }
 
 interface UseVertraEngineOptions {
@@ -137,7 +257,7 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
         onAutosaveError?.(err instanceof Error ? err.message : String(err));
         setAutosaveState('idle');
       });
-    }, 5000);
+    }, 2000);
   }, []);
 
   const play = useCallback(async (script: string, initialVtrBytes?: Uint8Array) => {
@@ -192,7 +312,11 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
             console.error('[Vertra] on_startup load_vtr error:', err);
           }
         }
-
+        scene.world.on_scene_graph_modified((_event: unknown) => {
+          const scene = sceneRef.current;
+          if (!scene) return;
+          useSceneStore.getState().setScene(buildReactSceneFromWorld(scene));
+        });
         // Enable editor mode so the scene starts with gizmos and object picking
         scene.enable_editor_mode();
         sceneRef.current = scene;
@@ -206,6 +330,10 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
             console.error('[Vertra] onStartup error:', msg);
           }
         }
+
+        // Populate the React scene store with all objects present after startup
+        // (covers both VTR-restored objects and anything spawned by onStartup).
+        useSceneStore.getState().setScene(buildReactSceneFromWorld(scene));
       });
 
       // Keep editor-side UI in sync with editor state transitions.
@@ -295,6 +423,7 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     sceneRef.current = null;
     setEngineMode(null);
     setEngineSelectedObject(undefined);
+    useSceneStore.getState().setScene(createEmptyReactScene());
     if (engineRef.current) {
       try {
         engineRef.current.free();
@@ -375,6 +504,37 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     triggerVtrAutosave();
   }, [triggerVtrAutosave]);
 
+  /**
+   * Update the name, str_id, or color of a live world object.
+   * Only refreshes the inspector snapshot for name/strId changes (not color),
+   * because color is managed as local state in the Inspector component and
+   * calling setEngineSelectedObject on every color tick causes full page rerenders.
+   */
+  const updateEngineObjectProps = useCallback((id: number, props: EngineObjectProps): void => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const obj = scene.world.get_object(id);
+    if (!obj) return;
+
+    if (props.name !== undefined) {
+      obj.name = props.name;
+    }
+    if (props.strId !== undefined && props.strId.trim() !== '') {
+      scene.world.rename_str_id(id, props.strId.trim());
+    }
+    if (props.color !== undefined) {
+      obj.set_color(new Float32Array(props.color));
+    }
+
+    // Refresh inspector snapshot only when name or strId changed — those affect
+    // the display header. Color changes don't need a snapshot refresh.
+    if (props.name !== undefined || props.strId !== undefined) {
+      const inspectorData = scene.editor.inspector() as InspectorData | undefined;
+      setEngineSelectedObject(inspectorData);
+    }
+    triggerVtrAutosave();
+  }, [triggerVtrAutosave]);
+
   const spawnGeometry = useCallback((type: GeometryType, name?: string): number | null => {
     const scene = sceneRef.current;
     if (!scene) return null;
@@ -393,8 +553,27 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
 
     obj.set_geometry(geo);
     const id = scene.spawn(obj);
+    // Explicitly rebuild React scene (on_scene_graph_modified fires asynchronously
+    // from the engine loop, so we also sync here for immediate UI feedback).
+    useSceneStore.getState().setScene(buildReactSceneFromWorld(scene));
     triggerVtrAutosave();
     return id;
+  }, [triggerVtrAutosave]);
+
+  const deleteEngineObject = useCallback((id: number): void => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.world.delete(id);
+    useSceneStore.getState().setScene(buildReactSceneFromWorld(scene));
+    triggerVtrAutosave();
+  }, [triggerVtrAutosave]);
+
+  const reparentEngineObject = useCallback((id: number, newParentId: number | null): void => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.world.reparent(id, newParentId ?? undefined);
+    useSceneStore.getState().setScene(buildReactSceneFromWorld(scene));
+    triggerVtrAutosave();
   }, [triggerVtrAutosave]);
 
   return {
@@ -410,7 +589,10 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     toggleEditorMode,
     sendEditorEvent,
     applyTransformToEngine,
+    updateEngineObjectProps,
     spawnGeometry,
+    deleteEngineObject,
+    reparentEngineObject,
   };
 }
 
