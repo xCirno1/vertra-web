@@ -24,6 +24,7 @@ pub struct Claims {
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: Uuid,
+    #[allow(dead_code)]
     pub email: String,
 }
 

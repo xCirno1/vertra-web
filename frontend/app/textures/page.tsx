@@ -18,7 +18,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { AnimatePresence as AP } from 'framer-motion';
 import { getPresignedUrl, evictPresignedUrl, evictCachedTexture } from '@/lib/storage/texture-cache';
 import TextureUploadModal from '@/components/studio/textures/TextureUploadModal';
 import type { TextureMeta } from '@/types/texture';
@@ -205,17 +204,18 @@ export default function TexturesPage() {
             { key: 'all', label: 'All' },
             { key: 'public', label: 'Public', icon: <Users className="w-3 h-3" /> },
             { key: 'private', label: 'Private', icon: <Lock className="w-3 h-3" /> },
-          ] as const).map(({ key, label, icon }) => (
+          ] as const).map((tab) => (
             <button
-              key={key}
-              onClick={() => setScopeFilter(key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors cursor-pointer ${scopeFilter === key
-                ? 'bg-vertra-cyan/15 text-vertra-cyan'
-                : 'text-vertra-text-dim hover:text-vertra-text hover:bg-vertra-surface-alt/40'
+              key={tab.key}
+              onClick={() => setScopeFilter(tab.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+                scopeFilter === tab.key
+                  ? 'bg-vertra-cyan/15 text-vertra-cyan'
+                  : 'text-vertra-text-dim hover:text-vertra-text hover:bg-vertra-surface-alt/40'
                 }`}
             >
-              {icon}
-              {label}
+              {'icon' in tab && tab.icon}
+              {tab.label}
             </button>
           ))}
         </div>
