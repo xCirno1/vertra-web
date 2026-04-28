@@ -26,11 +26,20 @@ pub fn create_router(state: AppState) -> Router {
                 .patch(projects::update_project)
                 .delete(projects::delete_project),
         )
+        .route(
+            "/projects/:id/publish",
+            axum::routing::post(projects::publish_project)
+                .delete(projects::unpublish_project),
+        )
+        // Public (no-auth) project endpoint — by share token
+        .route("/projects/s/:token", get(projects::get_public_project))
         // VTR snapshot endpoints (Cloudflare R2)
         .route(
             "/api/vtr/:project_id",
             axum::routing::put(vtr::upload_vtr).get(vtr::download_vtr),
         )
+        // Public (no-auth) VTR download — by share token
+        .route("/api/vtr/s/:token", get(vtr::download_public_vtr))
         // Texture endpoints
         .route(
             "/textures/upload",

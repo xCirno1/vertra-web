@@ -69,6 +69,8 @@ export default function EditorPage() {
   const [canSyncToCloud, setCanSyncToCloud] = useState(false);
   const [script, setScript] = useState<string>(DEFAULT_ENGINE_SCRIPT);
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>(DEFAULT_PROJECT_SETTINGS);
+  const [isPublished, setIsPublished] = useState(false);
+  const [publishedToken, setPublishedToken] = useState<string | null>(null);
 
   const appendLog = useCallback((level: LogLevel, message: string) => {
     setLogs((prev) => [...prev, `[${level}] ${message}`].slice(-200));
@@ -158,6 +160,22 @@ export default function EditorPage() {
       setProjectSettings({ ...DEFAULT_PROJECT_SETTINGS, ...project.settings });
       setIsProjectLoading(false);
       appendLog('SUCCESS', `Project loaded from ${result.source} storage.`);
+
+      // Fetch publish state from cloud (if authenticated)
+      if (result.source === 'cloud') {
+        fetch(`/api/projects/${projectId}`, { credentials: 'same-origin' })
+          .then(async (res) => {
+            if (!res.ok) return;
+            const data = (await res.json()) as {
+              is_published?: boolean;
+              published_token?: string | null;
+            };
+            if (!mounted) return;
+            setIsPublished(data.is_published ?? false);
+            setPublishedToken(data.published_token ?? null);
+          })
+          .catch(() => { /* non-fatal */ });
+      }
     };
 
     bootstrap().catch((error) => {
@@ -387,6 +405,44 @@ export default function EditorPage() {
     [appendLog, projectId]
   );
 
+  const handlePublish = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        appendLog('WARN', `Publish failed: HTTP ${res.status}`);
+        return;
+      }
+      const data = (await res.json()) as { is_published: boolean; published_token: string | null };
+      setIsPublished(data.is_published);
+      setPublishedToken(data.published_token ?? null);
+      appendLog('SUCCESS', 'Project published — public link is now active.');
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      appendLog('ERROR', `Publish failed: ${reason}`);
+    }
+  }, [appendLog, projectId]);
+
+  const handleUnpublish = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        appendLog('WARN', `Unpublish failed: HTTP ${res.status}`);
+        return;
+      }
+      setIsPublished(false);
+      appendLog('SUCCESS', 'Project unpublished — public link is now inactive.');
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      appendLog('ERROR', `Unpublish failed: ${reason}`);
+    }
+  }, [appendLog, projectId]);
+
   const handleEngineObjectPropsChange = useCallback(
     (id: number, props: EngineObjectProps) => {
       updateEngineObjectProps(id, props);
@@ -437,6 +493,10 @@ export default function EditorPage() {
             autosaveEnabled={projectSettings.autosaveEnabled}
             onToggleAutosave={handleToggleAutosave}
             onRenameProject={handleRenameProject}
+            isPublished={isPublished}
+            publishedToken={publishedToken}
+            onPublish={projectSource === 'cloud' ? handlePublish : undefined}
+            onUnpublish={projectSource === 'cloud' ? handleUnpublish : undefined}
           />
         }
         leftSidebar={

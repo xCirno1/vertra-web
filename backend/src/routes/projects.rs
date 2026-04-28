@@ -11,6 +11,7 @@ use crate::{
     middleware::auth::AuthUser,
     models::{
         CreateProjectRequest, OkResponse, ProjectDto, ProjectRow,
+        PublicProjectDto, PublicProjectRow,
         SyncProjectsRequest, SyncProjectsResponse, UpdateProjectRequest,
     },
     state::AppState,
@@ -25,7 +26,7 @@ pub async fn list_projects(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<ProjectDto>>> {
     let rows: Vec<ProjectRow> = sqlx::query_as(
-        "SELECT id, owner_id, name, description, thumbnail, scene, script, created_at, updated_at
+        "SELECT id, owner_id, name, description, thumbnail, scene, script, is_published, published_token, created_at, updated_at
          FROM projects
          WHERE owner_id = $1
          ORDER BY updated_at DESC",
@@ -46,7 +47,7 @@ pub async fn get_project(
     Path(project_id): Path<Uuid>,
 ) -> ApiResult<Json<ProjectDto>> {
     let row: Option<ProjectRow> = sqlx::query_as(
-        "SELECT id, owner_id, name, description, thumbnail, scene, script, created_at, updated_at
+        "SELECT id, owner_id, name, description, thumbnail, scene, script, is_published, published_token, created_at, updated_at
          FROM projects
          WHERE id = $1 AND owner_id = $2",
     )
@@ -78,7 +79,7 @@ pub async fn create_project(
     let row: ProjectRow = sqlx::query_as(
         "INSERT INTO projects (id, owner_id, name, description, thumbnail, scene, script, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, owner_id, name, description, thumbnail, scene, script, created_at, updated_at",
+         RETURNING id, owner_id, name, description, thumbnail, scene, script, is_published, published_token, created_at, updated_at",
     )
     .bind(project_id)
     .bind(auth.user_id)
@@ -128,7 +129,7 @@ pub async fn update_project(
              script      = COALESCE($7, script),
              updated_at  = $8
          WHERE id = $1 AND owner_id = $2
-         RETURNING id, owner_id, name, description, thumbnail, scene, script, created_at, updated_at",
+         RETURNING id, owner_id, name, description, thumbnail, scene, script, is_published, published_token, created_at, updated_at",
     )
     .bind(project_id)
     .bind(auth.user_id)
@@ -215,4 +216,89 @@ pub async fn sync_projects(
     }
 
     Ok(Json(SyncProjectsResponse { synced }))
+}
+
+/// `POST /projects/:id/publish`
+///
+/// Sets the project as published and generates a share token (reused on
+/// subsequent publishes so the URL stays stable).  Only the owner may publish.
+pub async fn publish_project(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Json<ProjectDto>> {
+    // Fetch existing token (if any) and verify ownership.
+    let existing: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT published_token FROM projects WHERE id = $1 AND owner_id = $2",
+    )
+    .bind(project_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let (existing_token,) = existing.ok_or(AppError::NotFound)?;
+
+    // Reuse the token if one already exists so the URL is stable.
+    let token = existing_token.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let row: ProjectRow = sqlx::query_as(
+        "UPDATE projects
+         SET is_published = true, published_token = $3
+         WHERE id = $1 AND owner_id = $2
+         RETURNING id, owner_id, name, description, thumbnail, scene, script, is_published, published_token, created_at, updated_at",
+    )
+    .bind(project_id)
+    .bind(auth.user_id)
+    .bind(&token)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(ProjectDto::from(row)))
+}
+
+/// `DELETE /projects/:id/publish`
+///
+/// Removes public access from a project (unpublish).  The token is preserved
+/// so the same URL can be reactivated if the owner publishes again.
+pub async fn unpublish_project(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Json<ProjectDto>> {
+    let row: Option<ProjectRow> = sqlx::query_as(
+        "UPDATE projects
+         SET is_published = false
+         WHERE id = $1 AND owner_id = $2
+         RETURNING id, owner_id, name, description, thumbnail, scene, script, is_published, published_token, created_at, updated_at",
+    )
+    .bind(project_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    row.map(ProjectDto::from)
+        .map(Json)
+        .ok_or(AppError::NotFound)
+}
+
+/// `GET /projects/s/:token`
+///
+/// Returns the stripped project data for an anonymously-accessible published
+/// project.  No authentication required.
+pub async fn get_public_project(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> ApiResult<Json<PublicProjectDto>> {
+    let row: Option<PublicProjectRow> = sqlx::query_as(
+        "SELECT id, name, description, scene, script
+         FROM projects
+         WHERE published_token = $1 AND is_published = true",
+    )
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await?;
+
+    row.map(PublicProjectDto::from)
+        .map(Json)
+        .ok_or(AppError::NotFound)
 }

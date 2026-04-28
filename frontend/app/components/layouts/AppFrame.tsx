@@ -23,6 +23,7 @@ export default function AppFrame({ children }: AppFrameProps) {
 
   const isEditorRoute = Boolean(pathname?.match(/^\/projects\/[^/]+$/));
   const isHomePage = pathname === '/';
+  const isPublicViewerRoute = Boolean(pathname?.match(/^\/s\/[^/]+$/));
 
   useEffect(() => {
     let mounted = true;
@@ -40,7 +41,7 @@ export default function AppFrame({ children }: AppFrameProps) {
     };
   }, [pathname]);
 
-  if (isEditorRoute || isHomePage) {
+  if (isEditorRoute || isHomePage || isPublicViewerRoute) {
     return <>{children}</>;
   }
 

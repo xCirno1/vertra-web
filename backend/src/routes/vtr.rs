@@ -119,3 +119,61 @@ pub async fn download_vtr(
 
     Ok(response)
 }
+
+/// `GET /api/vtr/s/:token`
+///
+/// Downloads the VTR scene snapshot for a published project using its share
+/// token.  No authentication required — the project must be published.
+pub async fn download_public_vtr(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> Result<Response, AppError> {
+    // Resolve the project id from the publish token.
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM projects WHERE published_token = $1 AND is_published = true",
+    )
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let (project_id,) = row.ok_or(AppError::NotFound)?;
+
+    let key = format!("vtr/{}.vtr", project_id);
+
+    let output = state
+        .s3
+        .get_object()
+        .bucket(&state.config.r2_bucket_name)
+        .key(&key)
+        .send()
+        .await
+        .map_err(|e| {
+            if let SdkError::ServiceError(ref se) = e {
+                if se.err().is_no_such_key() {
+                    return AppError::NotFound;
+                }
+            }
+            tracing::error!("R2 get_object error for key {key}: {e}");
+            AppError::Internal
+        })?;
+
+    let data = output
+        .body
+        .collect()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error reading R2 body for key {key}: {e}");
+            AppError::Internal
+        })?;
+
+    let bytes = data.into_bytes();
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, bytes.len())
+        .body(axum::body::Body::from(bytes))
+        .map_err(|_| AppError::Internal)?;
+
+    Ok(response)
+}

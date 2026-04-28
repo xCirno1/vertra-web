@@ -27,8 +27,20 @@ pub struct ProjectRow {
     pub thumbnail: Option<String>,
     pub scene: Option<Value>,
     pub script: Option<String>,
+    pub is_published: bool,
+    pub published_token: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Row returned when fetching a project by publish token (no auth).
+#[derive(Debug, sqlx::FromRow)]
+pub struct PublicProjectRow {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub scene: Option<Value>,
+    pub script: Option<String>,
 }
 
 // ─── API request / response DTOs ────────────────────────────────────────────
@@ -111,6 +123,8 @@ pub struct ProjectDto {
     pub thumbnail: Option<String>,
     pub scene: Option<Value>,
     pub script: Option<String>,
+    pub is_published: bool,
+    pub published_token: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -125,8 +139,32 @@ impl From<ProjectRow> for ProjectDto {
             thumbnail: row.thumbnail,
             scene: row.scene,
             script: row.script,
+            is_published: row.is_published,
+            published_token: row.published_token,
             created_at: row.created_at,
             updated_at: row.updated_at,
+        }
+    }
+}
+
+/// Stripped project data returned for anonymous public-viewer requests.
+#[derive(Debug, Serialize)]
+pub struct PublicProjectDto {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub scene: Option<Value>,
+    pub script: Option<String>,
+}
+
+impl From<PublicProjectRow> for PublicProjectDto {
+    fn from(row: PublicProjectRow) -> Self {
+        Self {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            scene: row.scene,
+            script: row.script,
         }
     }
 }

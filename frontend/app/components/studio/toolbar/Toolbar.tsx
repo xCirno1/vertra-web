@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Move3d,
@@ -28,6 +29,10 @@ import {
   Check,
   Cloud,
   Layers,
+  Globe2,
+  GlobeLock,
+  Copy,
+  X,
 } from 'lucide-react';
 import { AutosaveState, EngineState, GeometryType } from '@/hooks/useVertraEngine';
 import { useSceneStore } from '@/stores/sceneStore';
@@ -51,9 +56,14 @@ interface ToolbarProps {
   autosaveEnabled?: boolean;
   onToggleAutosave?: () => void;
   onRenameProject?: (name: string) => Promise<void> | void;
+  /** Publish state — undefined if user is not authenticated / cloud not available */
+  isPublished?: boolean;
+  publishedToken?: string | null;
+  onPublish?: () => Promise<void> | void;
+  onUnpublish?: () => Promise<void> | void;
 }
 
-type BusyAction = 'save' | 'png' | 'sync' | 'save-vtr' | null;
+type BusyAction = 'save' | 'png' | 'sync' | 'save-vtr' | 'publish' | null;
 
 const GEOMETRY_OPTIONS: Array<{ type: GeometryType; label: string; icon: React.ReactNode }> = [
   { type: 'cube', label: 'Cube', icon: <Box className="w-3.5 h-3.5" /> },
@@ -79,6 +89,10 @@ export default function Toolbar({
   autosaveEnabled = true,
   onToggleAutosave,
   onRenameProject,
+  isPublished = false,
+  publishedToken,
+  onPublish,
+  onUnpublish,
 }: ToolbarProps) {
   const { addEntity, currentProject, setCurrentProject } = useSceneStore();
   const {
@@ -97,12 +111,15 @@ export default function Toolbar({
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [geoMenuOpen, setGeoMenuOpen] = useState(false);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [isRenamingProject, setIsRenamingProject] = useState(false);
   const [renameValue, setRenameValue] = useState('');
 
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const geoMenuRef = useRef<HTMLDivElement>(null);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+  const shareModalRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const vtrInputRef = useRef<HTMLInputElement>(null);
 
@@ -141,6 +158,31 @@ export default function Toolbar({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [viewMenuOpen]);
+
+  // Close share modal on outside click
+  useEffect(() => {
+    if (!shareModalOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (shareModalRef.current && !shareModalRef.current.contains(e.target as Node)) {
+        setShareModalOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [shareModalOpen]);
+
+  const publicUrl =
+    typeof window !== 'undefined' && publishedToken
+      ? `${window.location.origin}/s/${publishedToken}`
+      : null;
+
+  const handleCopyLink = () => {
+    if (!publicUrl) return;
+    void navigator.clipboard.writeText(publicUrl).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    });
+  };
 
   // Focus rename input when it appears
   useEffect(() => {
@@ -531,6 +573,34 @@ export default function Toolbar({
                   />
                 </>
               )}
+
+              {/* Publish */}
+              <DropdownDivider />
+              {isPublished ? (
+                <>
+                  <DropdownItem
+                    icon={<Globe2 className="w-3.5 h-3.5 text-vertra-cyan" />}
+                    label="Share link…"
+                    onClick={() => { setFileMenuOpen(false); setShareModalOpen(true); }}
+                  />
+                  <DropdownItem
+                    icon={<GlobeLock className="w-3.5 h-3.5" />}
+                    label="Unpublish"
+                    onClick={() => runAction('publish', onUnpublish!)}
+                  />
+                </>
+              ) : (
+                <DropdownItem
+                  icon={<Globe2 className="w-3.5 h-3.5" />}
+                  label="Publish…"
+                  disabled={!onPublish}
+                  disabledHint="Sign in to publish"
+                  onClick={() => runAction('publish', async () => {
+                    await onPublish?.();
+                    setShareModalOpen(true);
+                  })}
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -548,6 +618,78 @@ export default function Toolbar({
           }}
         />
       </div>
+
+      {/* Share modal — rendered in a portal so Framer Motion transforms don't affect fixed positioning */}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {shareModalOpen && publicUrl && (
+            <motion.div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                ref={shareModalRef}
+                initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                transition={{ duration: 0.15 }}
+                className="w-full max-w-md rounded-xl border border-vertra-border/40 bg-vertra-surface p-5 shadow-2xl"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Globe2 className="w-4 h-4 text-vertra-cyan" />
+                    <h2 className="text-sm font-medium text-vertra-text">Project published</h2>
+                  </div>
+                  <button
+                    onClick={() => setShareModalOpen(false)}
+                    className="cursor-pointer text-vertra-text-dim hover:text-vertra-text transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <p className="text-xs text-vertra-text-dim mb-3">
+                  Anyone with this link can view your project in play mode.
+                </p>
+
+                <div className="flex items-center gap-2 rounded-lg border border-vertra-border/40 bg-vertra-bg px-3 py-2">
+                  <span className="flex-1 truncate text-xs text-vertra-text-dim font-mono">
+                    {publicUrl}
+                  </span>
+                  <button
+                    onClick={handleCopyLink}
+                    className="cursor-pointer flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-vertra-cyan hover:bg-vertra-surface-alt/60 transition-colors"
+                  >
+                    {copiedLink ? (
+                      <><Check className="w-3.5 h-3.5" /><span>Copied</span></>
+                    ) : (
+                      <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>
+                    )}
+                  </button>
+                </div>
+
+                {onUnpublish && (
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={() => {
+                        setShareModalOpen(false);
+                        void runAction('publish', onUnpublish);
+                      }}
+                      className="cursor-pointer flex items-center gap-1.5 text-xs text-vertra-text-dim hover:text-vertra-error transition-colors"
+                    >
+                      <GlobeLock className="w-3.5 h-3.5" />
+                      Unpublish
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </motion.div>
   );
 }
