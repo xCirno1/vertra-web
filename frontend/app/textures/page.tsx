@@ -208,8 +208,7 @@ export default function TexturesPage() {
             <button
               key={tab.key}
               onClick={() => setScopeFilter(tab.key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors cursor-pointer ${
-                scopeFilter === tab.key
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors cursor-pointer ${scopeFilter === tab.key
                   ? 'bg-vertra-cyan/15 text-vertra-cyan'
                   : 'text-vertra-text-dim hover:text-vertra-text hover:bg-vertra-surface-alt/40'
                 }`}
