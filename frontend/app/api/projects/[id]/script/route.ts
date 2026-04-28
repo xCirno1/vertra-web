@@ -15,14 +15,15 @@ function authHeader(req: NextRequest): Record<string, string> {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...authHeader(request),
   };
 
-  const res = await fetch(`${API_BASE}/projects/${params.id}`, { headers });
+  const res = await fetch(`${API_BASE}/projects/${id}`, { headers });
 
   if (!res.ok) {
     return NextResponse.json(
@@ -43,8 +44,9 @@ export async function GET(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...authHeader(request),
@@ -64,7 +66,7 @@ export async function PATCH(
     );
   }
 
-  const res = await fetch(`${API_BASE}/projects/${params.id}`, {
+  const res = await fetch(`${API_BASE}/projects/${id}`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify({ script: body.script }),

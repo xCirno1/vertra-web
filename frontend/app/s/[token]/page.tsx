@@ -69,7 +69,7 @@ export default function PublicViewerPage({ params }: { params: Promise<{ token: 
     };
 
     void start();
-  }, [project, isReady, engineState, play, token]);
+  }, [project, isReady, engineState, play, token, toggleEditorMode]);
 
   if (isProjectLoading) {
     return (

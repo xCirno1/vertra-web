@@ -363,7 +363,6 @@ function Scene1({ lp }: { lp: number }) {
 // ─── Scene 2 — Assembly ───────────────────────────────────────────────────────
 // Geometry showcase: primitives image reveals, wireframe assembles.
 function Scene2({ lp }: { lp: number }) {
-  const assembly = mapRange(lp, 0.10, 0.75, 0, 1);
   const imgReveal = mapRange(lp, 0.05, 0.60, 100, 0); // clip-path inset %
   const badgeOp = mapRange(lp, 0.25, 0.50, 0, 1);
   const badgeScale = mapRange(lp, 0.25, 0.50, 0.8, 1);

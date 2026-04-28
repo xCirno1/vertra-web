@@ -72,7 +72,6 @@ type EditorStateEvent =
 
 /** Execute user script in a sandboxed function with engine globals injected. */
 function executeUserScript(scriptBody: string): UserScriptHandlers {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const factory = new Function(
     'VertraObject',
     'Geometry',
@@ -416,7 +415,7 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
       setEngineState('error');
       engineRef.current = null;
     }
-  }, [engineState]);
+  }, [engineState, triggerVtrAutosave]);
 
   const stop = useCallback(() => {
     if (autosaveTimerRef.current) {
