@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import init, { VertraObject, Geometry, Transform, Camera } from '../../public/engine/vertra_binder.js';
 import type { WebWindow, Scene, FrameContext, InspectorData, EditorEventPayload } from '../../public/engine/vertra_binder.js';
 import { useSceneStore } from '@/stores/sceneStore';
+import { loadTextureRgba } from '@/lib/storage/texture-cache';
 import type { Entity as SceneEntity, Scene as ReactScene } from '@/types/scene';
 
 export type EngineState = 'idle' | 'loading' | 'running' | 'error';
@@ -546,9 +547,15 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
   }, [triggerVtrAutosave]);
 
   /**
-   * Fetch a texture from the API, decode it to raw RGBA pixels, register it
-   * with the engine via `scene.load_texture_from_rgba`, then point the object
-   * at that texture key.
+   * Load a texture into the engine for `objectId` using a three-level cache:
+   *
+   * 1. Engine memory  — `scene.has_texture(id)`: already uploaded, re-apply instantly.
+   * 2. IndexedDB      — decoded RGBA stored from a previous session.
+   * 3. Network        — CDN first (`cdn.vertra.com/cache/{id}.ktx2`),
+   *                     then presigned R2 URL as fallback.
+   *
+   * Decoded pixel data is persisted to IndexedDB on every network fetch so
+   * subsequent loads skip the network entirely.
    */
   const applyTextureToEngine = useCallback(async (
     objectId: number,
@@ -557,45 +564,23 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     const scene = sceneRef.current;
     if (!scene) return;
 
-    // 1. Get a presigned download URL from the API.
-    const urlRes = await fetch(`/api/textures/${textureId}`);
-    if (!urlRes.ok) {
-      console.error(`[Vertra] Failed to fetch texture URL for ${textureId}: ${urlRes.status}`);
-      return;
-    }
-    const { url } = (await urlRes.json()) as { url: string };
+    // ── Level 1: Engine memory ─────────────────────────────────────────────
+    // If the texture is already resident in the engine (loaded earlier this
+    // session) we only need to point the object at the existing handle.
+    if (!scene.has_texture(textureId)) {
+      // ── Levels 2 & 3: IndexedDB → CDN → R2 ──────────────────────────────
+      let rgba: { width: number; height: number; data: Uint8Array };
+      try {
+        rgba = await loadTextureRgba(textureId);
+      } catch (err) {
+        console.error('[Vertra] Failed to load texture:', err);
+        return;
+      }
 
-    // 2. Fetch the image and decode to RGBA pixels via OffscreenCanvas.
-    const imgRes = await fetch(url);
-    if (!imgRes.ok) {
-      console.error(`[Vertra] Failed to fetch texture image from R2: ${imgRes.status}`);
-      return;
-    }
-    const blob = await imgRes.blob();
-    let bitmap: ImageBitmap;
-    try {
-      bitmap = await createImageBitmap(blob);
-    } catch (err) {
-      console.error('[Vertra] createImageBitmap failed:', err);
-      return;
+      scene.load_texture_from_rgba(textureId, rgba.width, rgba.height, rgba.data);
     }
 
-    const { width, height } = bitmap;
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      bitmap.close();
-      console.error('[Vertra] OffscreenCanvas 2d context unavailable');
-      return;
-    }
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    const imageData = ctx.getImageData(0, 0, width, height);
-
-    // 3. Upload to the engine using the texture ID as the path key.
-    scene.load_texture_from_rgba(textureId, width, height, new Uint8Array(imageData.data.buffer));
-
-    // 4. Point the object at the texture.
+    // ── Apply to object ────────────────────────────────────────────────────
     const obj = scene.world.get_object(objectId);
     if (obj) {
       obj.texture_path = textureId;

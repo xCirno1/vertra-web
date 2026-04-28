@@ -39,7 +39,10 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/textures", get(textures::list_textures))
         .route("/textures/:id/url", get(textures::get_texture_url))
-        .route("/textures/:id", axum::routing::delete(textures::delete_texture))
+        .route(
+            "/textures/:id",
+            axum::routing::patch(textures::update_texture).delete(textures::delete_texture),
+        )
         .with_state(state)
 }
 

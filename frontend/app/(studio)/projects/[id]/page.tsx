@@ -11,6 +11,7 @@ import Inspector from '@/components/studio/inspector/Inspector';
 import BottomPanel from '@/components/studio/bottom-panel/BottomPanel';
 import TexturePanel from '@/components/studio/textures/TexturePanel';
 import { useSceneStore } from '@/stores/sceneStore';
+import { useUIStore } from '@/stores/uiStore';
 import { BufferPatch, useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
 import type { EngineObjectProps } from '@/hooks/useVertraEngine';
@@ -98,7 +99,7 @@ export default function EditorPage() {
 
   // ── Textures ──────────────────────────────────────────────────────────────
   const [availableTextures, setAvailableTextures] = useState<TextureMeta[]>([]);
-  const [texturePanelOpen, setTexturePanelOpen] = useState(true);
+  const { texturePanelOpen, toggleTexturePanel } = useUIStore();
 
   const fetchTextures = useCallback(async () => {
     try {
@@ -451,7 +452,7 @@ export default function EditorPage() {
                 projectId={projectId}
                 selectedObjectId={engineSelectedObject?.id}
                 onApplyTexture={handleApplyTexture}
-                onClose={() => setTexturePanelOpen(false)}
+                onClose={() => toggleTexturePanel()}
               />
             )}
           </>

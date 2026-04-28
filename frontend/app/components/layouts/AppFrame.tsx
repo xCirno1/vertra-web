@@ -13,6 +13,7 @@ interface AppFrameProps {
 
 const NAV_LINKS = [
   { href: '/projects', label: 'Projects' },
+  { href: '/textures', label: 'Textures' },
   { href: '/login', label: 'Sign In' },
 ];
 

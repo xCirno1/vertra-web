@@ -12,7 +12,7 @@ use chrono::Utc;
 use crate::{
     errors::{ApiResult, AppError},
     middleware::auth::AuthUser,
-    models::{OkResponse, PresignedUrlResponse, TextureDto, TextureRow},
+    models::{OkResponse, PresignedUrlResponse, TextureDto, TextureRow, UpdateTextureRequest},
     state::AppState,
 };
 
@@ -47,6 +47,7 @@ pub async fn upload_texture(
     let mut width: Option<i32> = None;
     let mut height: Option<i32> = None;
     let mut project_id: Option<Uuid> = None;
+    let mut is_public: bool = false;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
         tracing::warn!("Multipart field error: {e}");
@@ -119,6 +120,13 @@ pub async fn upload_texture(
 
                 project_id = Some(pid);
             }
+            "is_public" => {
+                let v = field
+                    .text()
+                    .await
+                    .map_err(|_| AppError::BadRequest("Invalid is_public field".into()))?;
+                is_public = matches!(v.trim(), "true" | "1");
+            }
             _ => {
                 // Drain unknown fields.
                 let _ = field.bytes().await;
@@ -170,9 +178,9 @@ pub async fn upload_texture(
     // Insert metadata into DB.
     let row: TextureRow = sqlx::query_as(
         "INSERT INTO textures
-            (id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at",
+            (id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public",
     )
     .bind(texture_id)
     .bind(auth.user_id)
@@ -185,6 +193,7 @@ pub async fn upload_texture(
     .bind(height)
     .bind(&r2_key)
     .bind(now)
+    .bind(is_public)
     .fetch_one(&state.db)
     .await?;
 
@@ -196,12 +205,18 @@ pub async fn upload_texture(
 pub struct ListTexturesQuery {
     /// When present, also return project-local textures for this project.
     pub project_id: Option<Uuid>,
+    /// When true, also return public textures from other users.
+    pub include_public: Option<bool>,
 }
 
 /// `GET /textures`
 ///
-/// Returns all global textures owned by the caller.  When `?project_id=<uuid>` is
-/// supplied, also returns textures scoped to that project.
+/// Returns textures visible to the caller:
+/// - Always returns all textures owned by the caller.
+/// - When `?project_id=<uuid>` is also supplied (studio panel), only returns the
+///   caller's global + project-local textures (ignores `include_public`).
+/// - When `?include_public=true` is supplied (gallery page), also returns public
+///   textures uploaded by other users.
 pub async fn list_textures(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -209,8 +224,9 @@ pub async fn list_textures(
 ) -> ApiResult<Json<Vec<TextureDto>>> {
     let rows: Vec<TextureRow> = match query.project_id {
         Some(pid) => {
+            // Studio panel: own global + own project-X.
             sqlx::query_as(
-                "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at
+                "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public
                  FROM textures
                  WHERE owner_id = $1 AND (project_id IS NULL OR project_id = $2)
                  ORDER BY created_at DESC",
@@ -220,11 +236,24 @@ pub async fn list_textures(
             .fetch_all(&state.db)
             .await?
         }
-        None => {
+        None if query.include_public.unwrap_or(false) => {
+            // Gallery page: all own textures + other users' public textures.
             sqlx::query_as(
-                "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at
+                "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public
                  FROM textures
-                 WHERE owner_id = $1 AND project_id IS NULL
+                 WHERE owner_id = $1 OR is_public = true
+                 ORDER BY created_at DESC",
+            )
+            .bind(auth.user_id)
+            .fetch_all(&state.db)
+            .await?
+        }
+        None => {
+            // Default: all own textures.
+            sqlx::query_as(
+                "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public
+                 FROM textures
+                 WHERE owner_id = $1
                  ORDER BY created_at DESC",
             )
             .bind(auth.user_id)
@@ -245,7 +274,7 @@ pub async fn get_texture_url(
     Path(texture_id): Path<Uuid>,
 ) -> ApiResult<Json<PresignedUrlResponse>> {
     let row: Option<TextureRow> = sqlx::query_as(
-        "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at
+        "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public
          FROM textures
          WHERE id = $1 AND owner_id = $2",
     )
@@ -285,7 +314,7 @@ pub async fn delete_texture(
     Path(texture_id): Path<Uuid>,
 ) -> ApiResult<Json<OkResponse>> {
     let row: Option<TextureRow> = sqlx::query_as(
-        "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at
+        "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public
          FROM textures
          WHERE id = $1 AND owner_id = $2",
     )
@@ -324,4 +353,47 @@ fn extension_for_mime(mime: &str) -> &'static str {
         "image/gif" => "gif",
         _ => "png",
     }
+}
+
+/// `PATCH /textures/:id`
+///
+/// Updates mutable texture metadata (currently: `name`).
+pub async fn update_texture(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(texture_id): Path<Uuid>,
+    Json(body): Json<UpdateTextureRequest>,
+) -> ApiResult<Json<TextureDto>> {
+    // Confirm ownership.
+    let row: Option<TextureRow> = sqlx::query_as(
+        "SELECT id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public
+         FROM textures
+         WHERE id = $1 AND owner_id = $2",
+    )
+    .bind(texture_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let row = row.ok_or(AppError::NotFound)?;
+
+    let new_name = match body.name {
+        Some(ref n) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => row.name.clone(),
+    };
+
+    let new_is_public = body.is_public.unwrap_or(row.is_public);
+
+    let updated: TextureRow = sqlx::query_as(
+        "UPDATE textures SET name = $1, is_public = $2 WHERE id = $3 AND owner_id = $4
+         RETURNING id, owner_id, project_id, name, file_name, mime_type, size_bytes, width, height, r2_key, created_at, is_public",
+    )
+    .bind(&new_name)
+    .bind(new_is_public)
+    .bind(texture_id)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(TextureDto::from(updated)))
 }

@@ -27,6 +27,7 @@ import {
   Eye,
   Check,
   Cloud,
+  Layers,
 } from 'lucide-react';
 import { AutosaveState, EngineState, GeometryType } from '@/hooks/useVertraEngine';
 import { useSceneStore } from '@/stores/sceneStore';
@@ -89,6 +90,8 @@ export default function Toolbar({
     toggleInspector,
     bottomPanelOpen,
     toggleBottomPanel,
+    texturePanelOpen,
+    toggleTexturePanel,
   } = useUIStore();
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -419,6 +422,12 @@ export default function Toolbar({
                 label="Bottom Panel"
                 checked={bottomPanelOpen}
                 onClick={toggleBottomPanel}
+              />
+              <DropdownToggleItem
+                icon={<Layers className="w-3.5 h-3.5" />}
+                label="Texture Panel"
+                checked={texturePanelOpen}
+                onClick={toggleTexturePanel}
               />
               <DropdownToggleItem
                 icon={<PanelRight className="w-3.5 h-3.5" />}

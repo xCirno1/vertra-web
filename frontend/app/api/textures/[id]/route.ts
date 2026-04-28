@@ -28,6 +28,27 @@ export async function GET(
 }
 
 /**
+ * PATCH /api/textures/[id]
+ * Updates mutable texture metadata (e.g. name).
+ */
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const body: unknown = await req.json().catch(() => ({}));
+
+  const backendRes = await fetch(`${BACKEND_URL}/textures/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    body: JSON.stringify(body),
+  });
+
+  const resBody: unknown = await backendRes.json().catch(() => null);
+  return NextResponse.json(resBody, { status: backendRes.status });
+}
+
+/**
  * DELETE /api/textures/[id]
  * Deletes a texture from R2 and the database.
  */

@@ -9,6 +9,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  Globe,
+  Lock,
+  Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { PendingTextureFile, TextureScope } from '@/types/texture';
@@ -49,7 +52,8 @@ async function buildPendingFile(file: File): Promise<PendingTextureFile> {
 }
 
 interface TextureUploadModalProps {
-  projectId: string;
+  /** Project ID – when provided enables the "Project only" scope option */
+  projectId?: string;
   onClose: () => void;
   onComplete: () => void;
 }
@@ -64,6 +68,10 @@ export default function TextureUploadModal({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // If projectId is absent, clamp to 'global' even if state says 'project'
+  const effectiveScope: TextureScope =
+    scope === 'project' && !projectId ? 'global' : scope;
 
   const addFiles = useCallback(async (rawFiles: FileList | File[]) => {
     const files = Array.from(rawFiles).filter(
@@ -113,7 +121,8 @@ export default function TextureUploadModal({
         fd.append('name', pf.name);
         if (pf.width != null) fd.append('width', String(pf.width));
         if (pf.height != null) fd.append('height', String(pf.height));
-        if (scope === 'project') fd.append('project_id', projectId);
+        if (effectiveScope === 'public') fd.append('is_public', 'true');
+        if (effectiveScope === 'project' && projectId) fd.append('project_id', projectId);
 
         const res = await fetch('/api/textures/upload', {
           method: 'POST',
@@ -260,32 +269,50 @@ export default function TextureUploadModal({
             ))}
           </AnimatePresence>
 
-          {/* Scope selector */}
+          {/* Scope / Visibility selector */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-vertra-text-dim mb-2">
-              Storage scope
+              Visibility
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              {(['global', 'project'] as TextureScope[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setScope(s)}
-                  className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                    scope === s
-                      ? 'border-vertra-cyan/60 bg-vertra-cyan/10 text-vertra-cyan'
-                      : 'border-vertra-border/40 bg-vertra-surface-alt/40 text-vertra-text-dim hover:border-vertra-border/70'
+            <div className={`grid gap-2 ${projectId ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              <button
+                onClick={() => setScope('public')}
+                className={`rounded-lg border px-3 py-2.5 text-left transition-colors cursor-pointer ${scope === 'public'
+                    ? 'border-vertra-cyan/60 bg-vertra-cyan/10 text-vertra-cyan'
+                    : 'border-vertra-border/40 bg-vertra-surface-alt/40 text-vertra-text-dim hover:border-vertra-border/70 hover:bg-vertra-surface-alt/70 hover:text-vertra-text'
                   }`}
+              >
+                <p className="text-xs font-semibold flex items-center gap-1.5">
+                  <Users className="w-3 h-3" />Public
+                </p>
+                <p className="text-xs mt-0.5 opacity-70">Visible to all users</p>
+              </button>
+              <button
+                onClick={() => setScope('global')}
+                className={`rounded-lg border px-3 py-2.5 text-left transition-colors cursor-pointer ${scope === 'global'
+                    ? 'border-vertra-cyan/60 bg-vertra-cyan/10 text-vertra-cyan'
+                    : 'border-vertra-border/40 bg-vertra-surface-alt/40 text-vertra-text-dim hover:border-vertra-border/70 hover:bg-vertra-surface-alt/70 hover:text-vertra-text'
+                  }`}
+              >
+                <p className="text-xs font-semibold flex items-center gap-1.5">
+                  <Globe className="w-3 h-3" />Private — Global
+                </p>
+                <p className="text-xs mt-0.5 opacity-70">All your projects</p>
+              </button>
+              {projectId && (
+                <button
+                  onClick={() => setScope('project')}
+                  className={`rounded-lg border px-3 py-2.5 text-left transition-colors cursor-pointer ${scope === 'project'
+                      ? 'border-vertra-cyan/60 bg-vertra-cyan/10 text-vertra-cyan'
+                      : 'border-vertra-border/40 bg-vertra-surface-alt/40 text-vertra-text-dim hover:border-vertra-border/70 hover:bg-vertra-surface-alt/70 hover:text-vertra-text'
+                    }`}
                 >
-                  <p className="text-xs font-semibold">
-                    {s === 'global' ? 'Global' : 'Project only'}
+                  <p className="text-xs font-semibold flex items-center gap-1.5">
+                    <Lock className="w-3 h-3" />Private — Project
                   </p>
-                  <p className="text-xs mt-0.5 opacity-70">
-                    {s === 'global'
-                      ? 'Available across all projects'
-                      : 'Only visible in this project'}
-                  </p>
+                  <p className="text-xs mt-0.5 opacity-70">This project only</p>
                 </button>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -296,6 +323,7 @@ export default function TextureUploadModal({
             Cancel
           </Button>
           <Button
+            variant="primary"
             size="sm"
             onClick={() => void handleUpload()}
             disabled={uploadableCount === 0 || isUploading}

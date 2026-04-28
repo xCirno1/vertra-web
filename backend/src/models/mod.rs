@@ -164,6 +164,8 @@ pub struct TextureRow {
     pub height: Option<i32>,
     pub r2_key: String,
     pub created_at: DateTime<Utc>,
+    /// Whether the texture is visible to all authenticated users.
+    pub is_public: bool,
 }
 
 /// Public-facing texture metadata returned by the API.
@@ -179,6 +181,7 @@ pub struct TextureDto {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub created_at: DateTime<Utc>,
+    pub is_public: bool,
 }
 
 impl From<TextureRow> for TextureDto {
@@ -194,6 +197,7 @@ impl From<TextureRow> for TextureDto {
             width: row.width,
             height: row.height,
             created_at: row.created_at,
+            is_public: row.is_public,
         }
     }
 }
@@ -202,4 +206,11 @@ impl From<TextureRow> for TextureDto {
 #[derive(Debug, Serialize)]
 pub struct PresignedUrlResponse {
     pub url: String,
+}
+
+/// PATCH /textures/:id request body — all fields optional.
+#[derive(Debug, Deserialize)]
+pub struct UpdateTextureRequest {
+    pub name: Option<String>,
+    pub is_public: Option<bool>,
 }

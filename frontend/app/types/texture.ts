@@ -9,9 +9,11 @@ export interface TextureMeta {
   width: number | null;
   height: number | null;
   created_at: string;
+  /** true = visible and usable by all authenticated users */
+  is_public: boolean;
 }
 
-export type TextureScope = 'global' | 'project';
+export type TextureScope = 'public' | 'global' | 'project';
 
 export interface PendingTextureFile {
   file: File;

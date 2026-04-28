@@ -6,6 +6,7 @@ interface UIState {
   sidebarOpen: boolean;
   inspectorOpen: boolean;
   bottomPanelOpen: boolean;
+  texturePanelOpen: boolean;
   bottomPanelHeight: number;
   sidebarWidth: number;
   inspectorWidth: number;
@@ -22,6 +23,7 @@ interface UIState {
   toggleSidebar: () => void;
   toggleInspector: () => void;
   toggleBottomPanel: () => void;
+  toggleTexturePanel: () => void;
   setBottomPanelHeight: (height: number) => void;
   setSidebarWidth: (width: number) => void;
   setInspectorWidth: (width: number) => void;
@@ -35,6 +37,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarOpen: true,
   inspectorOpen: true,
   bottomPanelOpen: true,
+  texturePanelOpen: true,
   bottomPanelHeight: 180,
   sidebarWidth: 280,
   inspectorWidth: 320,
@@ -58,6 +61,11 @@ export const useUIStore = create<UIState>((set) => ({
   toggleBottomPanel: () =>
     set((state) => ({
       bottomPanelOpen: !state.bottomPanelOpen,
+    })),
+
+  toggleTexturePanel: () =>
+    set((state) => ({
+      texturePanelOpen: !state.texturePanelOpen,
     })),
 
   setBottomPanelHeight: (height: number) =>
