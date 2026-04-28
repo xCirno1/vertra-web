@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
-import { hasCloudSession } from '@/lib/storage/project-storage';
 import { Logo } from '@/components/ui/logo';
 
 interface AppFrameProps {
@@ -19,27 +17,9 @@ const NAV_LINKS = [
 
 export default function AppFrame({ children }: AppFrameProps) {
   const pathname = usePathname();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
   const isEditorRoute = Boolean(pathname?.match(/^\/projects\/[^/]+$/));
   const isHomePage = pathname === '/';
   const isPublicViewerRoute = Boolean(pathname?.match(/^\/s\/[^/]+$/));
-
-  useEffect(() => {
-    let mounted = true;
-
-    const resolveSession = async () => {
-      const cloudSession = await hasCloudSession();
-      if (mounted) {
-        setIsAuthenticated(cloudSession);
-      }
-    };
-
-    resolveSession();
-    return () => {
-      mounted = false;
-    };
-  }, [pathname]);
 
   if (isEditorRoute || isHomePage || isPublicViewerRoute) {
     return <>{children}</>;

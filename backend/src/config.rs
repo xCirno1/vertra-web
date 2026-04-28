@@ -8,6 +8,7 @@ pub struct Config {
     /// TCP port the HTTP server binds to (default: 8080).
     pub port: u16,
     /// Allowed CORS origin for the frontend (e.g. http://localhost:3000).
+    #[allow(dead_code)]
     pub frontend_origin: String,
     /// Cloudflare R2 account ID (used to build the S3-compatible endpoint URL).
     pub r2_account_id: String,

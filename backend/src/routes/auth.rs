@@ -16,6 +16,9 @@ use crate::{
     state::AppState,
 };
 
+/// Columns returned by the login SELECT query.
+type LoginRow = (Uuid, String, Option<String>, Option<String>, String);
+
 /// `POST /auth/register`
 ///
 /// Creates a new user.  The password is hashed with bcrypt before storage.
@@ -84,7 +87,7 @@ pub async fn login(
         return Err(AppError::BadRequest("email and password are required".into()));
     }
 
-    let row: Option<(Uuid, String, Option<String>, Option<String>, String)> = sqlx::query_as(
+    let row: Option<LoginRow> = sqlx::query_as(
         "SELECT id, email, name, avatar, password_hash FROM users WHERE email = $1",
     )
     .bind(&body.email)

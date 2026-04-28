@@ -161,6 +161,6 @@ export function useVertra() {
     moduleBytes,
     lastPatch,
     updateBuffer,
-    wasmPacketBytes: runtimeRef.current?.wasmPacket.byteLength || moduleBytes,
+    wasmPacketBytes: moduleBytes,
   };
 }

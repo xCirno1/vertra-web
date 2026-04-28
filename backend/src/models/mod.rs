@@ -12,8 +12,11 @@ pub struct UserRow {
     pub email: String,
     pub name: Option<String>,
     pub avatar: Option<String>,
+    #[allow(dead_code)]
     pub password_hash: String,
+    #[allow(dead_code)]
     pub created_at: DateTime<Utc>,
+    #[allow(dead_code)]
     pub updated_at: DateTime<Utc>,
 }
 

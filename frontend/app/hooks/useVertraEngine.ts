@@ -72,7 +72,6 @@ type EditorStateEvent =
 
 /** Execute user script in a sandboxed function with engine globals injected. */
 function executeUserScript(scriptBody: string): UserScriptHandlers {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const factory = new Function(
     'VertraObject',
     'Geometry',
@@ -103,7 +102,7 @@ function inferEntityType(name: string): SceneEntity['type'] {
 function buildReactSceneFromWorld(engineScene: Scene): ReactScene {
   const entities = new Map<string, SceneEntity>();
 
-  const rootChildIds = Array.from(engineScene.world.get_roots()).map((id) => id.toString());
+  const rootChildIds = Array.from(engineScene.world.get_roots()).map((id) => String(id));
   const root: SceneEntity = {
     id: ENGINE_ROOT_ID,
     name: 'Scene',
@@ -130,7 +129,7 @@ function buildReactSceneFromWorld(engineScene: Scene): ReactScene {
     const pos = t.position;
     const rot = t.rotation;
     const sc = t.scale;
-    const childIds = Array.from(obj.children).map((cid) => cid.toString());
+    const childIds = Array.from(obj.children).map((cid) => String(cid));
     const parentStrId = obj.parent !== undefined ? obj.parent.toString() : ENGINE_ROOT_ID;
 
     entities.set(strId, {
@@ -416,7 +415,7 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
       setEngineState('error');
       engineRef.current = null;
     }
-  }, [engineState]);
+  }, [engineState, triggerVtrAutosave]);
 
   const stop = useCallback(() => {
     if (autosaveTimerRef.current) {
