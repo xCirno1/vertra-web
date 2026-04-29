@@ -20,6 +20,24 @@ pub struct UserRow {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Full profile row (extended columns added in migration 0006).
+#[derive(Debug, sqlx::FromRow)]
+pub struct ProfileRow {
+    pub id: Uuid,
+    pub email: String,
+    pub name: Option<String>,
+    pub avatar: Option<String>,
+    pub bio: Option<String>,
+    pub website: Option<String>,
+    pub location: Option<String>,
+    pub banner_color: String,
+    #[allow(dead_code)]
+    pub avatar_r2_key: Option<String>,
+    pub profile_settings: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Row returned from the `projects` table.
 #[derive(Debug, sqlx::FromRow)]
 pub struct ProjectRow {
@@ -90,10 +108,62 @@ impl From<&UserRow> for UserDto {
     }
 }
 
-/// GET /profile response
+/// GET /auth/me response (slim)
 #[derive(Debug, Serialize)]
 pub struct ProfileResponse {
     pub user: UserDto,
+}
+
+/// Full profile DTO including extended fields.
+#[derive(Debug, Serialize, Clone)]
+pub struct FullProfileDto {
+    pub id: Uuid,
+    pub email: String,
+    pub name: Option<String>,
+    pub avatar: Option<String>,
+    pub bio: Option<String>,
+    pub website: Option<String>,
+    pub location: Option<String>,
+    pub banner_color: String,
+    pub profile_settings: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<ProfileRow> for FullProfileDto {
+    fn from(row: ProfileRow) -> Self {
+        Self {
+            id: row.id,
+            email: row.email,
+            name: row.name,
+            avatar: row.avatar,
+            bio: row.bio,
+            website: row.website,
+            location: row.location,
+            banner_color: row.banner_color,
+            profile_settings: row.profile_settings,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+/// GET /profile response
+#[derive(Debug, Serialize)]
+pub struct FullProfileResponse {
+    pub user: FullProfileDto,
+}
+
+/// PATCH /profile request body — all fields optional
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub name: Option<String>,
+    pub bio: Option<String>,
+    pub website: Option<String>,
+    pub location: Option<String>,
+    pub banner_color: Option<String>,
+    /// Arbitrary JSON blob of client-side saved settings.
+    pub profile_settings: Option<Value>,
 }
 
 /// POST /projects request body

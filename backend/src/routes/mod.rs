@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use crate::state::AppState;
 
 pub mod auth;
+pub mod profile;
 pub mod projects;
 pub mod textures;
 pub mod vtr;
@@ -17,6 +18,17 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth/register", axum::routing::post(auth::register))
         .route("/auth/login", axum::routing::post(auth::login))
         .route("/auth/me", get(auth::me))
+        // Profile endpoints
+        .route(
+            "/profile",
+            get(profile::get_profile).patch(profile::update_profile),
+        )
+        .route(
+            "/profile/avatar",
+            axum::routing::post(profile::upload_avatar)
+                .delete(profile::delete_avatar)
+                .layer(axum::extract::DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
         // Project endpoints
         .route("/projects", get(projects::list_projects).post(projects::create_project))
         .route("/projects/sync", axum::routing::post(projects::sync_projects))

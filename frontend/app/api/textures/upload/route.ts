@@ -17,12 +17,18 @@ export async function POST(req: NextRequest) {
   // Forward the raw FormData body without re-parsing to preserve the multipart boundary.
   const formData = await req.formData();
 
-  const backendRes = await fetch(`${BACKEND_URL}/textures/upload`, {
-    method: 'POST',
-    headers: { ...authHeader(req) },
-    // Passing FormData lets the Fetch API set the correct Content-Type boundary automatically.
-    body: formData,
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/textures/upload`, {
+      method: 'POST',
+      headers: { ...authHeader(req) },
+      // Passing FormData lets the Fetch API set the correct Content-Type boundary automatically.
+      body: formData,
+    });
+  } catch (err) {
+    console.error('[textures/upload] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const body: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(body, { status: backendRes.status });

@@ -13,9 +13,15 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  const backendRes = await fetch(`${BACKEND_URL}/projects/s/${token}`, {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/projects/s/${token}`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    console.error('[projects/public] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const data: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(data, { status: backendRes.status });

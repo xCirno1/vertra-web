@@ -19,9 +19,15 @@ export async function GET(
 ) {
   const { projectId } = await params;
 
-  const backendRes = await fetch(`${BACKEND_URL}/api/vtr/${projectId}`, {
-    headers: authHeader(req),
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/api/vtr/${projectId}`, {
+      headers: authHeader(req),
+    });
+  } catch (err) {
+    console.error('[vtr] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   if (!backendRes.ok) {
     const body = await backendRes.text();
@@ -47,14 +53,20 @@ export async function PUT(
   const { projectId } = await params;
   const body = await req.arrayBuffer();
 
-  const backendRes = await fetch(`${BACKEND_URL}/api/vtr/${projectId}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      ...authHeader(req),
-    },
-    body,
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/api/vtr/${projectId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...authHeader(req),
+      },
+      body,
+    });
+  } catch (err) {
+    console.error('[vtr] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   if (!backendRes.ok) {
     const text = await backendRes.text();

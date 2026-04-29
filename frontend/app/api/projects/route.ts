@@ -14,9 +14,15 @@ function authHeader(req: NextRequest): Record<string, string> {
  * Lists all projects for the authenticated user.
  */
 export async function GET(req: NextRequest) {
-  const backendRes = await fetch(`${BACKEND_URL}/projects`, {
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/projects`, {
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[projects] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const body: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(body, { status: backendRes.status });
@@ -34,11 +40,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const backendRes = await fetch(`${BACKEND_URL}/projects`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-    body: JSON.stringify(body),
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error('[projects] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const data: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(data, { status: backendRes.status });

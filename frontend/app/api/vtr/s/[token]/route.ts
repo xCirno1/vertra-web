@@ -14,7 +14,13 @@ export async function GET(
 ) {
   const { token } = await params;
 
-  const backendRes = await fetch(`${BACKEND_URL}/api/vtr/s/${token}`);
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/api/vtr/s/${token}`);
+  } catch (err) {
+    console.error('[vtr/s] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   if (!backendRes.ok) {
     const body = await backendRes.text();
