@@ -18,9 +18,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const backendRes = await fetch(`${BACKEND_URL}/projects/${id}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/projects/${id}`, {
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[projects/id] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const data: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(data, { status: backendRes.status });
@@ -43,11 +49,17 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const backendRes = await fetch(`${BACKEND_URL}/projects/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-    body: JSON.stringify(body),
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error('[projects/id] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const data: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(data, { status: backendRes.status });
@@ -62,10 +74,16 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const backendRes = await fetch(`${BACKEND_URL}/projects/${id}`, {
-    method: 'DELETE',
-    headers: { ...authHeader(req) },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/projects/${id}`, {
+      method: 'DELETE',
+      headers: { ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[projects/id] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   if (backendRes.status === 204) {
     return new NextResponse(null, { status: 204 });

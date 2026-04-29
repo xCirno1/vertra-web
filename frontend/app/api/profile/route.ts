@@ -10,10 +10,29 @@ function authHeader(req: NextRequest): Record<string, string> {
 }
 
 /**
- * POST /api/projects/sync
- * Bulk-syncs locally-created projects to the cloud.
+ * GET /api/profile
+ * Returns the full extended profile for the authenticated user.
  */
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/profile`, {
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[profile] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
+
+  const data: unknown = await backendRes.json().catch(() => null);
+  return NextResponse.json(data, { status: backendRes.status });
+}
+
+/**
+ * PATCH /api/profile
+ * Updates mutable profile fields (name, bio, website, location, banner_color, profile_settings).
+ */
+export async function PATCH(req: NextRequest) {
   let body: unknown;
   try {
     body = await req.json();
@@ -23,13 +42,13 @@ export async function POST(req: NextRequest) {
 
   let backendRes: Response;
   try {
-    backendRes = await fetch(`${BACKEND_URL}/projects/sync`, {
-      method: 'POST',
+    backendRes = await fetch(`${BACKEND_URL}/profile`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeader(req) },
       body: JSON.stringify(body),
     });
   } catch (err) {
-    console.error('[projects/sync] Backend unreachable:', err);
+    console.error('[profile] Backend unreachable:', err);
     return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
   }
 

@@ -10,22 +10,21 @@ function authHeader(req: NextRequest): Record<string, string> {
 }
 
 /**
- * POST /api/projects/[id]/publish
- * Publishes the project and returns the updated project (with publishedToken).
+ * POST /api/profile/avatar
+ * Proxies a multipart avatar upload to the Rust backend.
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+export async function POST(req: NextRequest) {
+  const formData = await req.formData();
+
   let backendRes: Response;
   try {
-    backendRes = await fetch(`${BACKEND_URL}/projects/${id}/publish`, {
+    backendRes = await fetch(`${BACKEND_URL}/profile/avatar`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+      headers: { ...authHeader(req) },
+      body: formData,
     });
   } catch (err) {
-    console.error('[projects/id/publish] Backend unreachable:', err);
+    console.error('[profile/avatar] Backend unreachable:', err);
     return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
   }
 
@@ -34,22 +33,18 @@ export async function POST(
 }
 
 /**
- * DELETE /api/projects/[id]/publish
- * Unpublishes the project.
+ * DELETE /api/profile/avatar
+ * Removes the user's avatar.
  */
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+export async function DELETE(req: NextRequest) {
   let backendRes: Response;
   try {
-    backendRes = await fetch(`${BACKEND_URL}/projects/${id}/publish`, {
+    backendRes = await fetch(`${BACKEND_URL}/profile/avatar`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+      headers: { ...authHeader(req) },
     });
   } catch (err) {
-    console.error('[projects/id/publish] Backend unreachable:', err);
+    console.error('[profile/avatar] Backend unreachable:', err);
     return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
   }
 
