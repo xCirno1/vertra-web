@@ -91,6 +91,60 @@ pub async fn download_scripts(
     }
 }
 
+/// `GET /api/scripts/s/:token`
+///
+/// Returns the published project's script VFS blob from R2 using the share
+/// token. No authentication required.
+pub async fn download_public_scripts(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> Result<Response, AppError> {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM projects WHERE published_token = $1 AND is_published = true",
+    )
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let (project_id,) = row.ok_or(AppError::NotFound)?;
+    let key = scripts_key(project_id);
+
+    let result = state
+        .s3
+        .get_object()
+        .bucket(&state.config.r2_bucket_name)
+        .key(&key)
+        .send()
+        .await;
+
+    match result {
+        Ok(output) => {
+            let bytes = output
+                .body
+                .collect()
+                .await
+                .map_err(|e| {
+                    tracing::error!("R2 body collect error for key {key}: {e}");
+                    AppError::Internal
+                })?
+                .into_bytes();
+
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(bytes))
+                .unwrap())
+        }
+        Err(SdkError::ServiceError(svc)) if matches!(svc.err(), GetObjectError::NoSuchKey(_)) => {
+            Err(AppError::NotFound)
+        }
+        Err(e) => {
+            tracing::error!("R2 get_object error for key {key}: {e}");
+            Err(AppError::Internal)
+        }
+    }
+}
+
 /// `PUT /api/scripts/:project_id`
 ///
 /// Accepts a raw JSON body (the `ScriptVfs` object) and stores it in R2 at

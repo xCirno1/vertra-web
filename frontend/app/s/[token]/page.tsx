@@ -4,6 +4,9 @@ import { use, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
+import { getCapabilities } from '@/lib/engine/engineCapabilities';
+import { composeScript, stripTypeAnnotations } from '@/lib/scripts/runtime';
+import { EMPTY_VFS, type ScriptVfs } from '@/types/script';
 
 interface PublicProject {
   id: string;
@@ -15,19 +18,40 @@ interface PublicProject {
 export default function PublicViewerPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const [project, setProject] = useState<PublicProject | null>(null);
+  const [scriptVfs, setScriptVfs] = useState<ScriptVfs>(EMPTY_VFS);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [isProjectLoading, setIsProjectLoading] = useState(true);
+  const [isScriptsHydrated, setIsScriptsHydrated] = useState(false);
   const hasStarted = useRef(false);
+  const hasEnteredPlayMode = useRef(false);
 
   const { isReady, moduleBytes } = useVertra();
-  const { play, toggleEditorMode, engineState, engineError } = useVertraEngine({ autosaveEnabled: false });
+  const {
+    play,
+    toggleEditorMode,
+    attachScript,
+    engineState,
+    engineError,
+    activeEngineVersion,
+  } = useVertraEngine({ autosaveEnabled: false });
 
   // Load project metadata
   useEffect(() => {
+    let cancelled = false;
+
+    hasStarted.current = false;
+    hasEnteredPlayMode.current = false;
+    setProject(null);
+    setProjectError(null);
+    setScriptVfs(EMPTY_VFS);
+    setIsProjectLoading(true);
+    setIsScriptsHydrated(false);
+
     const load = async () => {
       try {
         const res = await fetch(`/api/projects/public/${token}`);
         if (!res.ok) {
+          if (cancelled) return;
           setProjectError(
             res.status === 404
               ? 'This project is not public or does not exist.'
@@ -36,40 +60,84 @@ export default function PublicViewerPage({ params }: { params: Promise<{ token: 
           return;
         }
         const data = (await res.json()) as PublicProject;
+        if (cancelled) return;
         setProject(data);
+
+        try {
+          const scriptsRes = await fetch(`/api/scripts/s/${token}`);
+          if (!scriptsRes.ok || cancelled) return;
+
+          const scriptsData = (await scriptsRes.json()) as Partial<ScriptVfs>;
+          if (cancelled) return;
+
+          setScriptVfs({
+            files: scriptsData.files ?? {},
+            bindings: scriptsData.bindings ?? {},
+          });
+        } catch {
+          // Published projects may not have a script VFS yet.
+        }
       } catch {
+        if (cancelled) return;
         setProjectError('Failed to load project.');
       } finally {
+        if (cancelled) return;
+        setIsScriptsHydrated(true);
         setIsProjectLoading(false);
       }
     };
 
     void load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   // Start engine once both project metadata and WASM module are ready
   useEffect(() => {
-    if (!project || !isReady || engineState !== 'idle' || hasStarted.current) return;
+    if (!project || !isReady || !isScriptsHydrated || engineState !== 'idle' || hasStarted.current) {
+      return;
+    }
+
     hasStarted.current = true;
 
     const start = async () => {
+      const mainScript = stripTypeAnnotations(project.script ?? '');
+
       try {
         const vtrRes = await fetch(`/api/vtr/s/${token}`);
         let vtrBytes: Uint8Array | undefined;
         if (vtrRes.ok) {
           vtrBytes = new Uint8Array(await vtrRes.arrayBuffer());
         }
-        await play(project.script ?? '', vtrBytes);
-        toggleEditorMode(); // switch from editor mode to play mode
+        await play(mainScript, vtrBytes);
       } catch {
         // If VTR fetch failed entirely, still start without a snapshot
-        await play(project.script ?? '');
-        toggleEditorMode();
+        await play(mainScript);
       }
     };
 
     void start();
-  }, [project, isReady, engineState, play, token, toggleEditorMode]);
+  }, [engineState, isReady, isScriptsHydrated, play, project, token]);
+
+  useEffect(() => {
+    if (engineState !== 'running' || hasEnteredPlayMode.current || !activeEngineVersion) {
+      return;
+    }
+
+    if (getCapabilities(activeEngineVersion).perObjectScripting) {
+      for (const [objectId, scriptPath] of Object.entries(scriptVfs.bindings)) {
+        const file = scriptVfs.files[scriptPath];
+        if (!file) continue;
+
+        attachScript(Number(objectId), stripTypeAnnotations(composeScript(file.tabs)));
+      }
+    }
+
+    toggleEditorMode();
+    hasEnteredPlayMode.current = true;
+  }, [activeEngineVersion, attachScript, engineState, scriptVfs, toggleEditorMode]);
 
   if (isProjectLoading) {
     return (

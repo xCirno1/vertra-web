@@ -13,9 +13,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { PanelHeader } from '@/components/ui/panel-header';
 import type { TextureMeta } from '@/types/texture';
-import { DEFAULT_SCRIPT_TABS } from './ScriptModal';
+import { composeScript, getDefaultScriptTabs, stripTypeAnnotations } from './ScriptModal';
 import { getCapabilities } from '@/lib/engine/engineCapabilities';
 import { useScriptStore } from '@/stores/scriptStore';
+import ScriptBindingPickerModal from './ScriptBindingPickerModal';
 
 const ScriptModal = dynamic(() => import('./ScriptModal'), { ssr: false });
 
@@ -88,6 +89,9 @@ export default function Inspector({
   const [selectedScriptPath, setSelectedScriptPath] = useState<string | null>(null);
   const [scriptAttached, setScriptAttached] = useState(false);
   const [scriptModalOpen, setScriptModalOpen] = useState(false);
+  const [scriptPickerOpen, setScriptPickerOpen] = useState(false);
+  const { vfs, updateFile, bindScriptToObject, unbindScriptFromObject } = useScriptStore();
+  const selectedEngineObjectId = engineSelectedObject?.id;
 
   // Sync local state when engineSelectedObject changes.
   // Transforms and color always sync (gizmo drags update them externally).
@@ -108,13 +112,23 @@ export default function Inspector({
   }, [engineSelectedObject, engineSelectedTexturePath]);
 
   useEffect(() => {
-    setScriptAttached(false);
-    setAttachedScriptPath(null);
-    setSelectedScriptPath(null);
-    setScriptModalOpen(false);
-  }, [engineSelectedObject?.id]);
+    if (selectedEngineObjectId === undefined) {
+      setScriptAttached(false);
+      setAttachedScriptPath(null);
+      setSelectedScriptPath(null);
+      setScriptModalOpen(false);
+      setScriptPickerOpen(false);
+      return;
+    }
 
-  const { vfs, updateFile } = useScriptStore();
+    const boundScriptPath = vfs.bindings[String(selectedEngineObjectId)] ?? null;
+    setScriptAttached(Boolean(boundScriptPath));
+    setAttachedScriptPath(boundScriptPath);
+    setSelectedScriptPath(boundScriptPath);
+    setScriptModalOpen(false);
+    setScriptPickerOpen(false);
+  }, [selectedEngineObjectId, vfs.bindings]);
+
   const scriptPaths = Object.keys(vfs.files);
   const entity = selectedEntityId ? getSelectedEntity() : null;
 
@@ -131,6 +145,34 @@ export default function Inspector({
     }
 
     void Promise.resolve(onBufferPatch(patch));
+  };
+
+  const openScriptPicker = () => {
+    if (scriptPaths.length === 0) return;
+    setSelectedScriptPath((current) => current ?? attachedScriptPath ?? scriptPaths[0]);
+    setScriptPickerOpen(true);
+  };
+
+  const handleAttachSelectedScript = () => {
+    if (!engineSelectedObject || !selectedScriptPath) return;
+    const file = vfs.files[selectedScriptPath];
+    if (!file) return;
+
+    bindScriptToObject(engineSelectedObject.id, selectedScriptPath);
+    onAttachScript?.(engineSelectedObject.id, stripTypeAnnotations(composeScript(file.tabs)));
+    setAttachedScriptPath(selectedScriptPath);
+    setScriptAttached(true);
+    setScriptPickerOpen(false);
+  };
+
+  const handleDetachBoundScript = () => {
+    if (!engineSelectedObject) return;
+    unbindScriptFromObject(engineSelectedObject.id);
+    onDetachScript?.(engineSelectedObject.id);
+    setScriptAttached(false);
+    setAttachedScriptPath(null);
+    setSelectedScriptPath(null);
+    setScriptModalOpen(false);
   };
 
   const updateAxis = (
@@ -456,6 +498,14 @@ export default function Inspector({
                   <Button
                     variant="ghost"
                     size="sm"
+                    onClick={openScriptPicker}
+                    title="Change bound script"
+                  >
+                    Change
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setScriptModalOpen(true)}
                     title="Open script editor"
                   >
@@ -465,50 +515,41 @@ export default function Inspector({
                   <Button
                     variant="danger"
                     size="sm"
-                    onClick={() => {
-                      onDetachScript?.(engineSelectedObject.id);
-                      setScriptAttached(false);
-                      setAttachedScriptPath(null);
-                    }}
+                    onClick={handleDetachBoundScript}
                   >
                     Detach
                   </Button>
                 </div>
               ) : (
-                /* Unattached state: show script picker + Attach */
-                <div className="flex items-center gap-1.5">
+                /* Unattached state: show tree picker launcher */
+                <div className="flex items-center gap-2">
                   {scriptPaths.length === 0 ? (
                     <span className="flex-1 text-[11px] text-vertra-text-dim italic">
                       No scripts — create one in the Scripts panel
                     </span>
                   ) : (
-                    <select
-                      value={selectedScriptPath ?? ''}
-                      onChange={(e) => setSelectedScriptPath(e.target.value || null)}
-                      className="flex-1 px-2 py-1 text-xs bg-vertra-surface-alt/60 border border-vertra-border/40 rounded text-vertra-text focus:border-vertra-cyan/60 outline-none"
-                    >
-                      <option value="">— pick a script —</option>
-                      {scriptPaths.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
+                    <>
+                      <span className="flex-1 text-[11px] text-vertra-text-dim">
+                        Choose a script file to bind to this object.
+                      </span>
+                      <Button variant="accent" size="sm" onClick={openScriptPicker}>
+                        Pick Script…
+                      </Button>
+                    </>
                   )}
-                  <Button
-                    variant="accent"
-                    size="sm"
-                    disabled={!selectedScriptPath}
-                    onClick={() => {
-                      if (!selectedScriptPath) return;
-                      setAttachedScriptPath(selectedScriptPath);
-                      setScriptModalOpen(true);
-                    }}
-                    title={!selectedScriptPath ? 'Select a script first' : 'Attach and open editor'}
-                  >
-                    Attach…
-                  </Button>
                 </div>
               )}
             </div>
+          )}
+
+          {(activeEngineVersion ? getCapabilities(activeEngineVersion).perObjectScripting : false) && scriptPickerOpen && (
+            <ScriptBindingPickerModal
+              scriptPaths={scriptPaths}
+              selectedPath={selectedScriptPath}
+              onSelect={setSelectedScriptPath}
+              onClose={() => setScriptPickerOpen(false)}
+              onConfirm={handleAttachSelectedScript}
+            />
           )}
 
           {/* Script modal — rendered at root level via portal */}
@@ -518,19 +559,17 @@ export default function Inspector({
               objectName={engineName || engineSelectedObject.name}
               objectId={engineSelectedObject.id}
               scriptPath={attachedScriptPath}
-              scriptTabs={vfs.files[attachedScriptPath]?.tabs ?? DEFAULT_SCRIPT_TABS}
+              scriptTabs={vfs.files[attachedScriptPath]?.tabs ?? getDefaultScriptTabs()}
               onScriptTabsChange={(tabs) => updateFile(attachedScriptPath, { tabs })}
               isAttached={scriptAttached}
               onAttach={(composedBody) => {
-                onAttachScript?.(engineSelectedObject.id, composedBody);
+                bindScriptToObject(engineSelectedObject.id, attachedScriptPath);
+                onAttachScript?.(engineSelectedObject.id, stripTypeAnnotations(composedBody));
                 setScriptAttached(true);
               }}
-              onDetach={() => {
-                onDetachScript?.(engineSelectedObject.id);
-                setScriptAttached(false);
-                setAttachedScriptPath(null);
-              }}
+              onDetach={handleDetachBoundScript}
               onClose={() => setScriptModalOpen(false)}
+              engineVersion={activeEngineVersion!}
             />
           )}
         </div>

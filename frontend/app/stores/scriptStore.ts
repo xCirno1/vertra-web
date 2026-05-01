@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { DEFAULT_SCRIPT_TABS } from '@/components/studio/inspector/ScriptModal';
+import type { ScriptTabs } from '@/components/studio/inspector/ScriptModal';
 import type { ScriptVfs, ScriptFile } from '@/types/script';
 import { EMPTY_VFS } from '@/types/script';
 
@@ -15,10 +16,12 @@ interface ScriptState {
   resetVfs: () => void;
 
   // ── File / folder CRUD ────────────────────────────────────────────────────
-  createFile: (path: string) => void;
+  createFile: (path: string, tabs?: ScriptTabs) => void;
   updateFile: (path: string, file: ScriptFile) => void;
   renameEntry: (oldPath: string, newPath: string) => void;
   deleteEntry: (path: string) => void;
+  bindScriptToObject: (objectId: number, path: string) => void;
+  unbindScriptFromObject: (objectId: number) => void;
 
   // ── Editor state ──────────────────────────────────────────────────────────
   openScript: (path: string) => void;
@@ -30,13 +33,18 @@ export const useScriptStore = create<ScriptState>()(
     vfs: EMPTY_VFS,
     openScriptPath: null,
 
-    setVfs: (vfs) => set((s) => { s.vfs = vfs; }),
+    setVfs: (vfs) => set((s) => {
+      s.vfs = {
+        files: vfs.files ?? {},
+        bindings: vfs.bindings ?? {},
+      };
+    }),
     resetVfs: () => set((s) => { s.vfs = EMPTY_VFS; s.openScriptPath = null; }),
 
-    createFile: (path) =>
+    createFile: (path, tabs = DEFAULT_SCRIPT_TABS) =>
       set((s) => {
         if (!s.vfs.files[path]) {
-          s.vfs.files[path] = { tabs: { ...DEFAULT_SCRIPT_TABS } };
+          s.vfs.files[path] = { tabs: { ...tabs } };
         }
       }),
 
@@ -59,6 +67,15 @@ export const useScriptStore = create<ScriptState>()(
           }
         }
         s.vfs.files = updatedFiles;
+
+        for (const [objectId, boundPath] of Object.entries(s.vfs.bindings)) {
+          if (boundPath === oldPath) {
+            s.vfs.bindings[objectId] = newPath;
+          } else if (boundPath.startsWith(oldPath + '/')) {
+            s.vfs.bindings[objectId] = newPath + boundPath.slice(oldPath.length);
+          }
+        }
+
         if (s.openScriptPath === oldPath) s.openScriptPath = newPath;
       }),
 
@@ -69,10 +86,25 @@ export const useScriptStore = create<ScriptState>()(
             delete s.vfs.files[k];
           }
         }
+
+        for (const [objectId, boundPath] of Object.entries(s.vfs.bindings)) {
+          if (boundPath === path || boundPath.startsWith(path + '/')) {
+            delete s.vfs.bindings[objectId];
+          }
+        }
+
         if (s.openScriptPath === path || s.openScriptPath?.startsWith(path + '/')) {
           s.openScriptPath = null;
         }
       }),
+
+    bindScriptToObject: (objectId, path) => set((s) => {
+      s.vfs.bindings[String(objectId)] = path;
+    }),
+
+    unbindScriptFromObject: (objectId) => set((s) => {
+      delete s.vfs.bindings[String(objectId)];
+    }),
 
     openScript: (path) => set((s) => { s.openScriptPath = path; }),
     closeScript: () => set((s) => { s.openScriptPath = null; }),

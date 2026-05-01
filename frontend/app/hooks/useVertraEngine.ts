@@ -757,16 +757,18 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
       const factory = new Function('JsScript', scriptBody);
       const script = factory(JsScriptClass) as JsScript;
       (scene as unknown as { attach_script: (id: number, script: JsScript) => void }).attach_script(id, script);
+      triggerVtrAutosave();
     } catch (err) {
       console.error('[Vertra] attachScript compile error:', err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [triggerVtrAutosave]);
 
   const detachScript = useCallback((id: number): void => {
     const scene = sceneRef.current;
     if (!scene) return;
     (scene as unknown as { detach_script: (id: number) => boolean }).detach_script(id);
-  }, []);
+    triggerVtrAutosave();
+  }, [triggerVtrAutosave]);
 
   return {
     engineState,
