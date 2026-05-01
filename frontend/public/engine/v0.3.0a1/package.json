@@ -1,0 +1,15 @@
+{
+  "name": "vertra-js",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "vertra_js_bg.wasm",
+    "vertra_js.js",
+    "vertra_js.d.ts"
+  ],
+  "main": "vertra_js.js",
+  "types": "vertra_js.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

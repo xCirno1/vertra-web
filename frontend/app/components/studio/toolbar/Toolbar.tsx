@@ -61,6 +61,8 @@ interface ToolbarProps {
   publishedToken?: string | null;
   onPublish?: () => Promise<void> | void;
   onUnpublish?: () => Promise<void> | void;
+  /** Optional slot rendered on the right side of the toolbar (e.g. engine version picker). */
+  settingsSlot?: React.ReactNode;
 }
 
 type BusyAction = 'save' | 'png' | 'sync' | 'save-vtr' | 'publish' | null;
@@ -93,6 +95,7 @@ export default function Toolbar({
   publishedToken,
   onPublish,
   onUnpublish,
+  settingsSlot,
 }: ToolbarProps) {
   const { addEntity, currentProject, setCurrentProject } = useSceneStore();
   const {
@@ -618,6 +621,8 @@ export default function Toolbar({
           }}
         />
       </div>
+
+      {settingsSlot}
 
       {/* Share modal — rendered in a portal so Framer Motion transforms don't affect fixed positioning */}
       {typeof document !== 'undefined' && createPortal(

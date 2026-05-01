@@ -5,6 +5,9 @@ import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import StudioLayout from '@/components/layouts/StudioLayout';
 import SceneTree from '@/components/studio/sidebar/SceneTree';
+import ScriptWorkspace from '@/components/studio/sidebar/ScriptWorkspace';
+import dynamic from 'next/dynamic';
+const ScriptModal = dynamic(() => import('@/components/studio/inspector/ScriptModal'), { ssr: false });
 import Viewport, { ViewportHandle } from '@/components/studio/Viewport';
 import Toolbar from '@/components/studio/toolbar/Toolbar';
 import Inspector from '@/components/studio/inspector/Inspector';
@@ -26,8 +29,12 @@ import {
   type ProjectSettings,
   type ProjectSource,
 } from '@/lib/storage/project-storage';
+import type { EngineVersion } from '@/lib/engine/engineCapabilities';
+import EngineVersionPicker from '@/components/studio/toolbar/EngineVersionPicker';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { TextureMeta } from '@/types/texture';
+import { useScriptStore } from '@/stores/scriptStore';
+import type { ScriptVfs } from '@/types/script';
 
 type LogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
 
@@ -72,6 +79,12 @@ export default function EditorPage() {
   const [isPublished, setIsPublished] = useState(false);
   const [publishedToken, setPublishedToken] = useState<string | null>(null);
 
+  /** Left panel tab: scene graph or script workspace. */
+  const [leftPanelTab, setLeftPanelTab] = useState<'scene' | 'scripts'>('scene');
+
+  // ── Script VFS ────────────────────────────────────────────────────────────
+  const { vfs, setVfs, updateFile, openScriptPath, closeScript } = useScriptStore();
+
   const appendLog = useCallback((level: LogLevel, message: string) => {
     setLogs((prev) => [...prev, `[${level}] ${message}`].slice(-200));
   }, []);
@@ -81,7 +94,9 @@ export default function EditorPage() {
     engineError: vertraEngineError,
     engineMode,
     engineSelectedObject,
+    selectedObjectTexturePath,
     autosaveState,
+    activeEngineVersion,
     play: playEngine,
     saveSceneVtr,
     loadSceneVtr,
@@ -93,9 +108,13 @@ export default function EditorPage() {
     spawnGeometry,
     deleteEngineObject,
     reparentEngineObject,
+    selectEngineObject,
+    attachScript,
+    detachScript,
   } = useVertraEngine({
     projectId,
     autosaveEnabled: projectSettings.autosaveEnabled,
+    engineVersion: projectSettings.engineVersion,
     onAutosaveError: (reason) => appendLog('WARN', `Autosave failed: ${reason}`),
   });
 
@@ -130,6 +149,8 @@ export default function EditorPage() {
   const didLogEngineLoading = useRef(false);
   const didLogEngineReady = useRef(false);
   const hasAutoStartedEngine = useRef(false);
+  const vfsAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isVfsHydrated = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -161,6 +182,21 @@ export default function EditorPage() {
       setIsProjectLoading(false);
       appendLog('SUCCESS', `Project loaded from ${result.source} storage.`);
 
+      // Load script VFS from cloud (non-fatal)
+      fetch(`/api/scripts/${projectId}`, { credentials: 'same-origin' })
+        .then(async (res) => {
+          if (!res.ok || !mounted) return;
+          const data = (await res.json()) as ScriptVfs;
+          if (mounted) {
+            setVfs(data);
+            isVfsHydrated.current = true;
+          }
+        })
+        .catch(() => {
+          // No scripts saved yet — mark hydrated so edits from here trigger autosave.
+          isVfsHydrated.current = true;
+        });
+
       // Fetch publish state from cloud (if authenticated)
       if (result.source === 'cloud') {
         fetch(`/api/projects/${projectId}`, { credentials: 'same-origin' })
@@ -191,7 +227,7 @@ export default function EditorPage() {
     return () => {
       mounted = false;
     };
-  }, [appendLog, projectId, setCurrentProject]);
+  }, [appendLog, projectId, setCurrentProject, setVfs]);
 
   useEffect(() => {
     if (isEngineLoading && !didLogEngineLoading.current) {
@@ -228,6 +264,23 @@ export default function EditorPage() {
       // Only log stop message after it was running (not on first render)
     }
   }, [appendLog, engineState, vertraEngineError]);
+
+  // Debounced script VFS autosave — fires 2 s after the last VFS mutation.
+  useEffect(() => {
+    if (!isVfsHydrated.current) return;
+    if (vfsAutosaveTimerRef.current) clearTimeout(vfsAutosaveTimerRef.current);
+    vfsAutosaveTimerRef.current = setTimeout(() => {
+      fetch(`/api/scripts/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(vfs),
+      }).catch(() => { /* non-fatal */ });
+    }, 2000);
+    return () => {
+      if (vfsAutosaveTimerRef.current) clearTimeout(vfsAutosaveTimerRef.current);
+    };
+  }, [vfs, projectId]);
 
   useEffect(() => {
     if (isProjectLoading || !isReady || engineState !== 'idle' || hasAutoStartedEngine.current) {
@@ -273,7 +326,15 @@ export default function EditorPage() {
     const refreshed = await loadProjects();
     setCanSyncToCloud(refreshed.canSyncToCloud);
     appendLog('SUCCESS', `Project saved to ${destination} storage.`);
-  }, [appendLog, currentProject, projectId, projectSettings, scene, script]);
+
+    // Persist script VFS to cloud (non-fatal)
+    fetch(`/api/scripts/${projectId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(vfs),
+    }).catch(() => { /* non-fatal */ });
+  }, [appendLog, currentProject, projectId, projectSettings, scene, script, vfs]);
 
   const handleExportPng = useCallback(async () => {
     const blob = await viewportRef.current?.captureScreenshot();
@@ -371,6 +432,10 @@ export default function EditorPage() {
 
   const handleToggleAutosave = useCallback(() => {
     setProjectSettings((prev) => ({ ...prev, autosaveEnabled: !prev.autosaveEnabled }));
+  }, []);
+
+  const handleEngineVersionChange = useCallback((version: EngineVersion | undefined) => {
+    setProjectSettings((prev) => ({ ...prev, engineVersion: version }));
   }, []);
 
   const handleEngineTransformChange = useCallback(
@@ -497,15 +562,48 @@ export default function EditorPage() {
             publishedToken={publishedToken}
             onPublish={projectSource === 'cloud' ? handlePublish : undefined}
             onUnpublish={projectSource === 'cloud' ? handleUnpublish : undefined}
+            settingsSlot={
+              <EngineVersionPicker
+                projectVersion={projectSettings.engineVersion}
+                onProjectVersionChange={handleEngineVersionChange}
+              />
+            }
           />
         }
         leftSidebar={
           <>
+            {/* Tab toggle */}
+            <div className="flex shrink-0 border-b border-vertra-border/40 bg-vertra-surface/60">
+              <button
+                onClick={() => setLeftPanelTab('scene')}
+                className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${leftPanelTab === 'scene'
+                    ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
+                    : 'text-vertra-text-dim hover:text-vertra-text'
+                  }`}
+              >
+                Scene
+              </button>
+              <button
+                onClick={() => setLeftPanelTab('scripts')}
+                className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${leftPanelTab === 'scripts'
+                    ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
+                    : 'text-vertra-text-dim hover:text-vertra-text'
+                  }`}
+              >
+                Scripts
+              </button>
+            </div>
+
             <div className="flex-1 overflow-y-auto min-h-0">
-              <SceneTree
-                onDeleteEntity={deleteEngineObject}
-                onReparentEntity={reparentEngineObject}
-              />
+              {leftPanelTab === 'scene' ? (
+                <SceneTree
+                  onDeleteEntity={deleteEngineObject}
+                  onReparentEntity={reparentEngineObject}
+                  onSelectEntity={selectEngineObject}
+                />
+              ) : (
+                <ScriptWorkspace />
+              )}
             </div>
             {texturePanelOpen && (
               <TexturePanel
@@ -513,6 +611,18 @@ export default function EditorPage() {
                 selectedObjectId={engineSelectedObject?.id}
                 onApplyTexture={handleApplyTexture}
                 onClose={() => toggleTexturePanel()}
+              />
+            )}
+
+            {/* File-edit ScriptModal opened from Script Workspace */}
+            {openScriptPath && (
+              <ScriptModal
+                mode="file"
+                scriptPath={openScriptPath}
+                scriptTabs={vfs.files[openScriptPath]?.tabs ?? { on_startup: '', on_update: '', on_event: '' }}
+                onScriptTabsChange={(tabs) => updateFile(openScriptPath, { tabs })}
+                onSave={() => closeScript()}
+                onClose={() => closeScript()}
               />
             )}
           </>
@@ -541,10 +651,14 @@ export default function EditorPage() {
             engineReady={isReady}
             engineLoading={isEngineLoading}
             engineSelectedObject={engineSelectedObject}
+            engineSelectedTexturePath={selectedObjectTexturePath}
             onEngineTransformChange={handleEngineTransformChange}
             onEngineObjectPropsChange={handleEngineObjectPropsChange}
             availableTextures={availableTextures}
             onApplyTexture={handleApplyTexture}
+            activeEngineVersion={activeEngineVersion}
+            onAttachScript={attachScript}
+            onDetachScript={detachScript}
           />
         }
         bottomPanel={

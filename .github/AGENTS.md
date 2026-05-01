@@ -396,14 +396,3 @@ Each is user-invocable via the agent picker (`⌘K` or `⌘⇧A`).
 - Try specifying phase/scope explicitly
 
 ---
-
-## Next Steps
-
-Your development pipeline is now ready! You can:
-
-1. **Try the Orchestrator** with a real feature request
-2. **Use individual agents** for specific tasks
-3. **Customize agents further** as workflows evolve
-4. **Create workspace instructions** for team-specific conventions
-
-Happy building! 🚀

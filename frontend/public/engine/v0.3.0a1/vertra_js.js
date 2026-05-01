@@ -1,4 +1,4 @@
-/* @ts-self-types="./vertra_binder.d.ts" */
+/* @ts-self-types="./vertra_js.d.ts" */
 
 /**
  * A 3D camera that controls the viewpoint and projection used to render the scene.
@@ -385,6 +385,42 @@ export class Geometry {
 if (Symbol.dispose) Geometry.prototype[Symbol.dispose] = Geometry.prototype.free;
 
 /**
+ * A script object that can be attached to a scene object.
+ *
+ * Create one with the constructor, supplying up to three callback functions,
+ * then attach it to an object ID via [`Scene::attach_script`].
+ */
+export class JsScript {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        JsScriptFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_jsscript_free(ptr, 0);
+    }
+    /**
+     * Create a new script from an options object with optional callback fields.
+     *
+     * ```js
+     * const script = new JsScript({
+     *   on_update(id, world, dt) { }, // Do anything inside this callback!
+     * });
+     * ```
+     * @param {any} options
+     */
+    constructor(options) {
+        const ret = wasm.wasmscript_new(options);
+        this.__wbg_ptr = ret >>> 0;
+        JsScriptFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+}
+if (Symbol.dispose) JsScript.prototype[Symbol.dispose] = JsScript.prototype.free;
+
+/**
  * The root container for a 3D environment.
  *
  * Manages the object lifecycle, scene hierarchy, GPU pipeline, and the active
@@ -410,6 +446,24 @@ export class Scene {
         wasm.__wbg_scene_free(ptr, 0);
     }
     /**
+     * Attach a [`JsScript`] to object `id`.
+     *
+     * `on_start` will be called on the next frame before `on_update`.
+     * Replaces any previously attached script.
+     *
+     * # Arguments
+     *
+     * * `id`     - Integer ID of the target object.
+     * * `script` - A [`JsScript`] constructed with callback functions.
+     * @param {number} id
+     * @param {JsScript} script
+     */
+    attach_script(id, script) {
+        _assertClass(script, JsScript);
+        var ptr0 = script.__destroy_into_raw();
+        wasm.scene_attach_script(this.__wbg_ptr, id, ptr0);
+    }
+    /**
      * Returns the primary camera used to render this scene.
      *
      * The camera is owned by the scene; do not attempt to manually destroy it
@@ -419,6 +473,17 @@ export class Scene {
     get camera() {
         const ret = wasm.scene_camera(this.__wbg_ptr);
         return Camera.__wrap(ret);
+    }
+    /**
+     * Detach and drop the script for object `id`.
+     *
+     * Returns `true` if a script existed and was removed, `false` otherwise.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    detach_script(id) {
+        const ret = wasm.scene_detach_script(this.__wbg_ptr, id);
+        return ret !== 0;
     }
     /**
      * Exits editor mode and switches to **play mode**.
@@ -453,6 +518,15 @@ export class Scene {
      */
     enable_editor_mode() {
         wasm.scene_enable_editor_mode(this.__wbg_ptr);
+    }
+    /**
+     * Returns `true` when object `id` has a script attached.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    has_script(id) {
+        const ret = wasm.scene_has_script(this.__wbg_ptr, id);
+        return ret !== 0;
     }
     /**
      * Returns `true` if a texture has been uploaded under `path_key`.
@@ -1038,6 +1112,16 @@ if (Symbol.dispose) WebWindow.prototype[Symbol.dispose] = WebWindow.prototype.fr
  *
  * Handles creation, destruction, and retrieval of scene objects.
  * Obtain the world for the active scene via [`Scene::world`].
+ *
+ * # Script-callback safety
+ *
+ * All mutation methods (`spawn_object`, `delete`, `reparent`,
+ * `rename_str_id`) are safe to call from inside an `on_start`,
+ * `on_update`, or `on_fixed_update` script callback.  When called during a
+ * callback the operation is **silently deferred**: it is placed on an
+ * internal queue and replayed against the real world the instant the
+ * callback returns.  The JS caller receives the correct return value
+ * immediately (e.g. the pre-allocated spawn ID).
  */
 export class World {
     static __wrap(ptr) {
@@ -1060,9 +1144,8 @@ export class World {
     /**
      * Removes an object and all of its descendants from the world.
      *
-     * Any integer IDs or [`Object`] references held in JavaScript that
-     * point to the deleted object or its children become dangling after this
-     * call; do not use them for further world queries.
+     * When called **inside a script callback** the deletion is deferred until
+     * the callback returns.
      *
      * # Arguments
      *
@@ -1075,19 +1158,8 @@ export class World {
     /**
      * Resolves a stable string identifier (`str_id`) to its integer ID.
      *
-     * This is an O(1) hash-map lookup but still incurs string-hashing overhead.
-     *
      * > **Performance note:** do not call this inside `on_update` or other
-     * > high-frequency loops.  Call it once during `on_startup`, store the
-     * > resulting integer ID, and use that directly during updates.
-     *
-     * # Arguments
-     *
-     * * `str_id` - The string handle assigned at object creation (e.g. `"player"`).
-     *
-     * # Returns
-     *
-     * The integer ID, or `undefined` when no object with that `str_id` exists.
+     * > high-frequency loops.  Cache the ID in `on_start` instead.
      * @param {string} str_id
      * @returns {number | undefined}
      */
@@ -1103,14 +1175,6 @@ export class World {
      * The returned [`Object`] is **owned by the world** — do not manually
      * destroy it on the JS side, and do not retain it across calls to
      * [`World::delete`] with the same ID.
-     *
-     * # Arguments
-     *
-     * * `id` - The unique integer ID of the object to fetch.
-     *
-     * # Returns
-     *
-     * The object, or `undefined` when no object with that ID exists in the world.
      * @param {number} id
      * @returns {VertraObject | undefined}
      */
@@ -1119,11 +1183,7 @@ export class World {
         return ret === 0 ? undefined : VertraObject.__wrap(ret);
     }
     /**
-     * Returns the integer IDs of all root-level objects (objects with no parent).
-     *
-     * # Returns
-     *
-     * An array of integer IDs, one for each root object.
+     * Returns the integer IDs of all root-level objects.
      * @returns {Uint32Array}
      */
     get_roots() {
@@ -1136,21 +1196,6 @@ export class World {
      * Registers a callback fired whenever the scene graph changes structurally
      * (object added, deleted, or re-parented).
      *
-     * This installs the internal Rust hook on the underlying world **and**
-     * stores the JS handler — both steps happen in a single call, so you can
-     * wire it up directly from `on_startup` without touching `WebWindow`:
-     *
-     * ```js
-     * window.on_startup((state, scene) => {
-     *   scene.world.on_scene_graph_modified(ev => console.log(ev));
-     * });
-     * ```
-     *
-     * The event object is a tagged union:
-     * - `{ type: "object_added",      data: { id, parent_id } }`
-     * - `{ type: "object_deleted",    data: { id } }`
-     * - `{ type: "object_reparented", data: { id, old_parent, new_parent } }`
-     *
      * Pass `undefined` / `null` to unregister a previously set callback.
      *
      * Callback signature: `(event: SceneGraphModifiedEvent) => void`
@@ -1160,18 +1205,9 @@ export class World {
         wasm.world_on_scene_graph_modified(this.__wbg_ptr, isLikeNone(f) ? 0 : addToExternrefTable0(f));
     }
     /**
-     * Renames the stable string identifier of a live world object and keeps
-     * the internal name-handle cache in sync.
+     * Renames the stable string identifier of a live world object.
      *
-     * Prefer this over writing to `object.str_id` directly when the object is
-     * already part of the world, as the world maintains an internal
-     * `str_id → integer id` lookup table that must stay consistent.
-     *
-     * # Arguments
-     *
-     * * `id`         - Integer ID of the object to rename.
-     * * `new_str_id` - The replacement string identifier (should be unique
-     *   within this world).
+     * When called **inside a script callback** the rename is deferred.
      *
      * # Returns
      *
@@ -1189,16 +1225,9 @@ export class World {
     /**
      * Moves an object to a new parent in the scene hierarchy.
      *
-     * Pass `undefined` / `null` as `new_parent_id` to move the object to the
-     * scene root.  The object's children are carried along unchanged.
-     *
-     * Returns `false` and leaves the hierarchy unchanged when any of these
-     * conditions hold:
-     * - `id` does not exist.
-     * - `new_parent_id` does not exist (and is not `null`).
-     * - `new_parent_id` equals `id` (self-parenting).
-     * - `new_parent_id` is already the current parent.
-     * - `new_parent_id` is a descendant of `id` (would create a cycle).
+     * When called **inside a script callback** the reparent is deferred.
+     * `true` is returned optimistically; the actual outcome is determined
+     * when the mutation is flushed after the callback.
      *
      * # Arguments
      *
@@ -1217,7 +1246,13 @@ export class World {
         return ret !== 0;
     }
     /**
-     * Spawns an object into the world, optionally as a child of an existing object.
+     * Spawns an object into the world, optionally as a child of an existing
+     * object.
+     *
+     * When called **inside a script callback** the spawn is deferred until
+     * the callback returns; the returned ID is pre-allocated and will be
+     * valid immediately after the callback.  Sequential deferred spawns
+     * receive sequential IDs.
      *
      * # Arguments
      *
@@ -1480,6 +1515,10 @@ function __wbg_get_imports() {
             const ret = arg0.buttons;
             return ret;
         },
+        __wbg_call_368fa9c372d473ba: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg0.call(arg1, arg2, arg3);
+            return ret;
+        }, arguments); },
         __wbg_call_7f2987183bb62793: function() { return handleError(function (arg0, arg1) {
             const ret = arg0.call(arg1);
             return ret;
@@ -2106,6 +2145,10 @@ function __wbg_get_imports() {
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
         __wbg_get_ed0642c4b9d31ddf: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.get(arg0, arg1);
+            return ret;
+        }, arguments); },
+        __wbg_get_f96702c6245e4ef9: function() { return handleError(function (arg0, arg1) {
             const ret = Reflect.get(arg0, arg1);
             return ret;
         }, arguments); },
@@ -3554,6 +3597,10 @@ function __wbg_get_imports() {
             const ret = arg0.width;
             return ret;
         },
+        __wbg_world_new: function(arg0) {
+            const ret = World.__wrap(arg0);
+            return ret;
+        },
         __wbg_writeBuffer_2384abff9a0faef7: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5, arg6) {
             arg0.writeBuffer(arg1, arg2, getArrayU8FromWasm0(arg3, arg4), arg5, arg6);
         }, arguments); },
@@ -3561,62 +3608,62 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, getArrayU8FromWasm0(arg2, arg3), arg4, arg5);
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2792, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2809, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2889, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2906, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h6e218faabae865be);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 835, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 852, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h2429a9f9595891cb);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Array<any>"), NamedExternref("ResizeObserver")], shim_idx: 3, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h3b36c266f7e2ea1c);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Array<any>"), NamedExternref("ResizeObserver")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hbe68fcdbb9ed28f8);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 1, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h05fa65389040e2a9);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h568f75eb71d01c31);
             return ret;
         },
         __wbindgen_cast_0000000000000006: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 2792, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 2809, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_5);
             return ret;
         },
         __wbindgen_cast_0000000000000007: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("FocusEvent")], shim_idx: 1, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h05fa65389040e2a9_6);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("FocusEvent")], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h568f75eb71d01c31_6);
             return ret;
         },
         __wbindgen_cast_0000000000000008: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 2792, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 2809, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_7);
             return ret;
         },
         __wbindgen_cast_0000000000000009: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PageTransitionEvent")], shim_idx: 2792, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PageTransitionEvent")], shim_idx: 2809, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_8);
             return ret;
         },
         __wbindgen_cast_000000000000000a: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 2792, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 2809, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_9);
             return ret;
         },
         __wbindgen_cast_000000000000000b: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 2792, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 2809, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_10);
             return ret;
         },
         __wbindgen_cast_000000000000000c: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 2797, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 2814, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h6243cd57395b9938);
             return ret;
         },
@@ -3682,7 +3729,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./vertra_binder_bg.js": import0,
+        "./vertra_js_bg.js": import0,
     };
 }
 
@@ -3698,16 +3745,16 @@ function wasm_bindgen__convert__closures_____invoke__h2429a9f9595891cb(arg0, arg
     wasm.wasm_bindgen__convert__closures_____invoke__h2429a9f9595891cb(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h05fa65389040e2a9(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h05fa65389040e2a9(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h568f75eb71d01c31(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h568f75eb71d01c31(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_5(arg0, arg1, arg2) {
     wasm.wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_5(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h05fa65389040e2a9_6(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h05fa65389040e2a9_6(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h568f75eb71d01c31_6(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h568f75eb71d01c31_6(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h088dea6ac3c12d02_7(arg0, arg1, arg2) {
@@ -3733,8 +3780,8 @@ function wasm_bindgen__convert__closures_____invoke__h6e218faabae865be(arg0, arg
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h3b36c266f7e2ea1c(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h3b36c266f7e2ea1c(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__hbe68fcdbb9ed28f8(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__hbe68fcdbb9ed28f8(arg0, arg1, arg2, arg3);
 }
 
 
@@ -3838,6 +3885,9 @@ const SceneFinalization = (typeof FinalizationRegistry === 'undefined')
 const TransformFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_transform_free(ptr >>> 0, 1));
+const JsScriptFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_jsscript_free(ptr >>> 0, 1));
 const WebWindowFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_webwindow_free(ptr >>> 0, 1));
@@ -4258,7 +4308,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('vertra_binder_bg.wasm', import.meta.url);
+        module_or_path = new URL('vertra_js_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 
