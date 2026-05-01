@@ -6,6 +6,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { X, GripHorizontal, Code2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
+import type { EngineVersion } from '@/lib/engine/engineCapabilities';
+import { composeScript } from '@/lib/scripts/runtime';
+
+export { composeScript, stripTypeAnnotations } from '@/lib/scripts/runtime';
 
 const ScriptEditor = dynamic(
   () => import('../bottom-panel/ScriptEditor'),
@@ -23,32 +27,26 @@ const ScriptEditor = dynamic(
 
 const TABS = [
   { key: 'on_startup' as const, label: 'on_startup', hint: 'Called once when the script is attached.' },
-  { key: 'on_update'  as const, label: 'on_update',  hint: 'Called every frame. dt = delta time in seconds.' },
-  { key: 'on_event'   as const, label: 'on_event',   hint: 'Called for each scene event.' },
+  { key: 'on_update' as const, label: 'on_update', hint: 'Called every frame. dt = delta time in seconds.' },
+  { key: 'on_event' as const, label: 'on_event', hint: 'Called for each scene event.' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
 
 export interface ScriptTabs {
   on_startup: string;
-  on_update:  string;
-  on_event:   string;
+  on_update: string;
+  on_event: string;
 }
 
 export const DEFAULT_SCRIPT_TABS: ScriptTabs = {
-  on_startup: `function on_startup(id, world) {\n  // Called once when the script is attached.\n  // const obj = world.get_object(id);\n}`,
-  on_update:  `function on_update(id, world, dt) {\n  // Called every frame. dt = delta time in seconds.\n}`,
-  on_event:   `function on_event(id, world, event) {\n  // Called for each scene event.\n}`,
+  on_startup: `function on_startup(id: number, world: World): void {\n  // Called once when the script is attached.\n  // const obj = world.get_object(id);\n}`,
+  on_update: `function on_update(id: number, world: World, dt: number): void {\n  // Called every frame. dt = delta time in seconds.\n}`,
+  on_event: `function on_event(id: number, world: World, event): void {\n  // Called for each scene event.\n}`,
 };
 
-/** Compose all three tab bodies into a single script body for JsScript. */
-export function composeScript(tabs: ScriptTabs): string {
-  return [
-    tabs.on_startup,
-    tabs.on_update,
-    tabs.on_event,
-    'return new JsScript({ on_startup, on_update, on_event });',
-  ].join('\n\n');
+export function getDefaultScriptTabs(): ScriptTabs {
+  return DEFAULT_SCRIPT_TABS;
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -59,19 +57,20 @@ interface ScriptModalProps {
 
   // ── object mode ──
   objectName?: string;
-  objectId?:   number;
+  objectId?: number;
   isAttached?: boolean;
-  onAttach?:   (composedBody: string) => void;
-  onDetach?:   () => void;
+  onAttach?: (composedBody: string) => void;
+  onDetach?: () => void;
 
   // ── file mode ──
   scriptPath?: string;
-  onSave?:     (tabs: ScriptTabs) => void;
+  onSave?: (tabs: ScriptTabs) => void;
 
   // ── shared ──
   scriptTabs: ScriptTabs;
   onScriptTabsChange: (tabs: ScriptTabs) => void;
-  onClose:  () => void;
+  onClose: () => void;
+  engineVersion: EngineVersion;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -88,15 +87,16 @@ export default function ScriptModal({
   scriptPath,
   onSave,
   onClose,
+  engineVersion,
 }: ScriptModalProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('on_startup');
-  const [pos,  setPos]  = useState<{ x: number; y: number } | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [size, setSize] = useState({ width: 700, height: 520 });
 
   // Center on first mount
   useEffect(() => {
     setPos({
-      x: Math.max(0, (window.innerWidth  - 700) / 2),
+      x: Math.max(0, (window.innerWidth - 700) / 2),
       y: Math.max(0, (window.innerHeight - 520) / 2),
     });
   }, []);
@@ -133,7 +133,7 @@ export default function ScriptModal({
     const onMove = (ev: MouseEvent) => {
       if (!resizeRef.current) return;
       setSize({
-        width:  Math.max(420, resizeRef.current.startW + ev.clientX - resizeRef.current.startX),
+        width: Math.max(420, resizeRef.current.startW + ev.clientX - resizeRef.current.startX),
         height: Math.max(340, resizeRef.current.startH + ev.clientY - resizeRef.current.startY),
       });
     };
@@ -152,7 +152,7 @@ export default function ScriptModal({
 
   const modal = (
     <div
-      className="fixed inset-0 z-50 pointer-events-none"
+      className="fixed inset-0 z-200 pointer-events-none"
       aria-modal="true"
       role="dialog"
       aria-label={mode === 'file' ? `Script editor — ${scriptPath ?? 'script'}` : `Script editor — ${objectName ?? 'object'}`}
@@ -164,7 +164,7 @@ export default function ScriptModal({
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.96 }}
           transition={{ duration: 0.12 }}
-          className="pointer-events-auto absolute flex flex-col rounded-xl border border-vertra-border/60 bg-vertra-surface/95 backdrop-blur-md shadow-2xl overflow-hidden"
+          className="pointer-events-auto absolute flex flex-col rounded-xl border border-vertra-border/60 bg-vertra-surface/95 backdrop-blur-md shadow-2xl overflow-visible"
           style={{ left: pos.x, top: pos.y, width: size.width, height: size.height }}
         >
           {/* ── Title bar / drag handle ──────────────────────────────── */}
@@ -201,11 +201,10 @@ export default function ScriptModal({
                 type="button"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setActiveTab(tab.key)}
-                className={`px-3 py-2 text-xs font-mono transition-colors border-b-2 -mb-px ${
-                  activeTab === tab.key
+                className={`cursor-pointer px-3 py-2 text-xs font-mono transition-colors border-b-2 -mb-px ${activeTab === tab.key
                     ? 'border-vertra-cyan text-vertra-cyan'
                     : 'border-transparent text-vertra-text-dim hover:text-vertra-text'
-                }`}
+                  }`}
               >
                 {tab.label}
               </button>
@@ -216,7 +215,7 @@ export default function ScriptModal({
           </div>
 
           {/* ── Editor area ──────────────────────────────────────────── */}
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-visible">
             {/* Render all three editors, show only the active one — preserves Monaco state */}
             {TABS.map((tab) => (
               <div
@@ -227,6 +226,7 @@ export default function ScriptModal({
                 <ScriptEditor
                   value={scriptTabs[tab.key]}
                   onChange={(v) => onScriptTabsChange({ ...scriptTabs, [tab.key]: v })}
+                  engineVersion={engineVersion}
                 />
               </div>
             ))}

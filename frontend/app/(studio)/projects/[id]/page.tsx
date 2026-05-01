@@ -18,7 +18,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { BufferPatch, useVertra } from '@/hooks/useVertra';
 import { useVertraEngine } from '@/hooks/useVertraEngine';
 import type { EngineObjectProps } from '@/hooks/useVertraEngine';
-import { DEFAULT_ENGINE_SCRIPT } from '@/lib/constants/defaultScript';
+import { getDefaultEngineScript } from '@/lib/constants/defaultScript';
 import {
   createProjectDraft,
   loadProjects,
@@ -29,12 +29,14 @@ import {
   type ProjectSettings,
   type ProjectSource,
 } from '@/lib/storage/project-storage';
-import type { EngineVersion } from '@/lib/engine/engineCapabilities';
+import { getCapabilities, type EngineVersion } from '@/lib/engine/engineCapabilities';
 import EngineVersionPicker from '@/components/studio/toolbar/EngineVersionPicker';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { TextureMeta } from '@/types/texture';
 import { useScriptStore } from '@/stores/scriptStore';
 import type { ScriptVfs } from '@/types/script';
+import { composeScript, getDefaultScriptTabs, stripTypeAnnotations } from '@/components/studio/inspector/ScriptModal';
+import { resolveEngineVersion } from '@/lib/storage/engine-version-storage';
 
 type LogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
 
@@ -74,7 +76,7 @@ export default function EditorPage() {
   const [logs, setLogs] = useState<string[]>(['[INFO] Studio boot sequence started']);
   const [projectSource, setProjectSource] = useState<ProjectSource>('local');
   const [canSyncToCloud, setCanSyncToCloud] = useState(false);
-  const [script, setScript] = useState<string>(DEFAULT_ENGINE_SCRIPT);
+  const [script, setScript] = useState<string>(getDefaultEngineScript());
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>(DEFAULT_PROJECT_SETTINGS);
   const [isPublished, setIsPublished] = useState(false);
   const [publishedToken, setPublishedToken] = useState<string | null>(null);
@@ -151,6 +153,11 @@ export default function EditorPage() {
   const hasAutoStartedEngine = useRef(false);
   const vfsAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isVfsHydrated = useRef(false);
+  const vfsRef = useRef(vfs);
+
+  useEffect(() => {
+    vfsRef.current = vfs;
+  }, [vfs]);
 
   useEffect(() => {
     let mounted = true;
@@ -173,12 +180,14 @@ export default function EditorPage() {
         appendLog('WARN', 'Project not found. Created a local draft project.');
       }
 
+      const settings = { ...DEFAULT_PROJECT_SETTINGS, ...project.settings };
+
       setCurrentProject(project);
       setProjectSource(result.source);
       setCanSyncToCloud(result.canSyncToCloud);
       // Restore saved script, fall back to default
-      setScript(project.script ?? DEFAULT_ENGINE_SCRIPT);
-      setProjectSettings({ ...DEFAULT_PROJECT_SETTINGS, ...project.settings });
+      setScript(project.script ?? getDefaultEngineScript());
+      setProjectSettings(settings);
       setIsProjectLoading(false);
       appendLog('SUCCESS', `Project loaded from ${result.source} storage.`);
 
@@ -298,17 +307,17 @@ export default function EditorPage() {
       } else if (res.status !== 404) {
         appendLog('WARN', `VTR fetch responded ${res.status} — starting with empty scene.`);
       }
-      void playEngine(script, initialVtrBytes);
+      void playEngine(stripTypeAnnotations(script), initialVtrBytes);
     }).catch((err: unknown) => {
       const reason = err instanceof Error ? err.message : String(err);
       appendLog('WARN', `VTR fetch failed: ${reason} — starting with empty scene.`);
-      void playEngine(script);
+      void playEngine(stripTypeAnnotations(script));
     });
   }, [appendLog, engineState, isProjectLoading, isReady, playEngine, projectId, script]);
 
   const handlePlayEngine = useCallback(() => {
     appendLog('INFO', 'Starting Vertra Engine…');
-    void playEngine(script);
+    void playEngine(stripTypeAnnotations(script));
   }, [appendLog, playEngine, script]);
 
   const handleSave = useCallback(async () => {
@@ -515,6 +524,19 @@ export default function EditorPage() {
     [updateEngineObjectProps]
   );
 
+  const editorEngineVersion = activeEngineVersion ?? resolveEngineVersion(projectSettings.engineVersion);
+
+  useEffect(() => {
+    if (engineState !== 'running') return;
+    if (!getCapabilities(editorEngineVersion).perObjectScripting) return;
+
+    for (const [objectId, scriptPath] of Object.entries(vfs.bindings)) {
+      const file = vfsRef.current.files[scriptPath];
+      if (!file) continue;
+      attachScript(Number(objectId), stripTypeAnnotations(composeScript(file.tabs)));
+    }
+  }, [attachScript, editorEngineVersion, engineState, vfs.bindings]);
+
   if (isProjectLoading) {
     return (
       <motion.div
@@ -577,8 +599,8 @@ export default function EditorPage() {
               <button
                 onClick={() => setLeftPanelTab('scene')}
                 className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${leftPanelTab === 'scene'
-                    ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
-                    : 'text-vertra-text-dim hover:text-vertra-text'
+                  ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
+                  : 'text-vertra-text-dim hover:text-vertra-text'
                   }`}
               >
                 Scene
@@ -586,8 +608,8 @@ export default function EditorPage() {
               <button
                 onClick={() => setLeftPanelTab('scripts')}
                 className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${leftPanelTab === 'scripts'
-                    ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
-                    : 'text-vertra-text-dim hover:text-vertra-text'
+                  ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
+                  : 'text-vertra-text-dim hover:text-vertra-text'
                   }`}
               >
                 Scripts
@@ -619,10 +641,11 @@ export default function EditorPage() {
               <ScriptModal
                 mode="file"
                 scriptPath={openScriptPath}
-                scriptTabs={vfs.files[openScriptPath]?.tabs ?? { on_startup: '', on_update: '', on_event: '' }}
+                scriptTabs={vfs.files[openScriptPath]?.tabs ?? getDefaultScriptTabs()}
                 onScriptTabsChange={(tabs) => updateFile(openScriptPath, { tabs })}
                 onSave={() => closeScript()}
                 onClose={() => closeScript()}
+                engineVersion={editorEngineVersion}
               />
             )}
           </>
@@ -667,6 +690,7 @@ export default function EditorPage() {
             isLoadingAssets={isEngineLoading}
             script={script}
             onScriptChange={setScript}
+            engineVersion={editorEngineVersion}
           />
         }
       />

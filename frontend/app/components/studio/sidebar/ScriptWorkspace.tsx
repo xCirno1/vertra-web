@@ -17,6 +17,7 @@ import { useScriptStore } from '@/stores/scriptStore';
 import { useUIStore } from '@/stores/uiStore';
 import { Button } from '@/components/ui/button';
 import { PanelHeader } from '@/components/ui/panel-header';
+import { getDefaultScriptTabs } from '@/components/studio/inspector/ScriptModal';
 import type { ScriptVfs } from '@/types/script';
 
 // ─── Tree node types ──────────────────────────────────────────────────────────
@@ -77,11 +78,9 @@ function RenameInput({
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(initialValue);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <input
-      ref={inputRef}
       autoFocus
       value={value}
       onChange={(e) => setValue(e.target.value)}
@@ -99,15 +98,33 @@ function RenameInput({
 
 // ─── Tree node row ────────────────────────────────────────────────────────────
 
+interface TreeNodeRowProps {
+  node: TreeNode;
+  depth: number;
+  onOpen: (path: string) => void;
+  onCreateInFolder?: (folderPath: string) => void;
+  draggingPathRef: React.MutableRefObject<string | null>;
+  dragOverFolder: string | null;
+  onDragOverFolder: (path: string | null) => void;
+  onDropInFolder: (folderPath: string) => void;
+  creatingInFolder: string | null;
+  onCancelCreateInFolder: () => void;
+  onCommitCreateInFolder: (folderPath: string, name: string) => void;
+}
+
 function TreeNodeRow({
   node,
   depth,
   onOpen,
-}: {
-  node: TreeNode;
-  depth: number;
-  onOpen: (path: string) => void;
-}) {
+  onCreateInFolder,
+  draggingPathRef,
+  dragOverFolder,
+  onDragOverFolder,
+  onDropInFolder,
+  creatingInFolder,
+  onCancelCreateInFolder,
+  onCommitCreateInFolder,
+}: TreeNodeRowProps) {
   const { renameEntry, deleteEntry } = useScriptStore();
   const [expanded, setExpanded] = useState(true);
   const [renaming, setRenaming] = useState(false);
@@ -122,12 +139,42 @@ function TreeNodeRow({
     setRenaming(false);
   };
 
+  const isDropTarget = node.type === 'folder' && dragOverFolder === node.path;
+
   return (
     <>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="group flex items-center gap-1 px-2 py-0.5 rounded hover:bg-vertra-surface cursor-pointer select-none"
+        draggable
+        onDragStart={(e) => {
+          draggingPathRef.current = node.path;
+          (e as unknown as React.DragEvent).dataTransfer.effectAllowed = 'move';
+          // Prevent the drag event from bubbling to a parent folder row
+          e.stopPropagation();
+        }}
+        onDragEnd={() => {
+          draggingPathRef.current = null;
+          onDragOverFolder(null);
+        }}
+        onDragOver={node.type === 'folder' ? (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          onDragOverFolder(node.path);
+        } : undefined}
+        onDragLeave={node.type === 'folder' ? (e) => {
+          // Only clear if leaving the folder row itself, not a child
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            onDragOverFolder(null);
+          }
+        } : undefined}
+        onDrop={node.type === 'folder' ? (e) => {
+          e.preventDefault();
+          onDragOverFolder(null);
+          onDropInFolder(node.path);
+        } : undefined}
+        className={`group flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer select-none transition-colors ${isDropTarget ? 'bg-vertra-cyan/10 ring-1 ring-vertra-cyan/40' : 'hover:bg-vertra-surface'
+          }`}
         style={{ paddingLeft: `${8 + indent}px` }}
         onClick={() => {
           if (node.type === 'folder') setExpanded((e) => !e);
@@ -164,16 +211,25 @@ function TreeNodeRow({
         {/* Action buttons (visible on hover) */}
         {!renaming && (
           <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+            {node.type === 'folder' && onCreateInFolder && (
+              <button
+                title="New file in folder"
+                className="p-0.5 rounded hover:bg-vertra-surface-alt text-vertra-text-dim hover:text-vertra-cyan cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); onCreateInFolder(node.path); setExpanded(true); }}
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            )}
             <button
               title="Rename"
-              className="p-0.5 rounded hover:bg-vertra-surface-alt text-vertra-text-dim hover:text-vertra-text"
+              className="p-0.5 rounded hover:bg-vertra-surface-alt text-vertra-text-dim hover:text-vertra-text cursor-pointer"
               onClick={(e) => { e.stopPropagation(); setRenaming(true); }}
             >
               <Pencil className="w-3 h-3" />
             </button>
             <button
               title="Delete"
-              className="p-0.5 rounded hover:bg-vertra-surface-alt text-vertra-text-dim hover:text-vertra-error"
+              className="p-0.5 rounded hover:bg-vertra-surface-alt text-vertra-text-dim hover:text-vertra-error cursor-pointer"
               onClick={(e) => { e.stopPropagation(); deleteEntry(node.path); }}
             >
               <Trash2 className="w-3 h-3" />
@@ -182,30 +238,86 @@ function TreeNodeRow({
         )}
       </motion.div>
 
-      {/* Recursive children */}
+      {/* Recursive children + inline create prompt */}
       {node.type === 'folder' && expanded && (
         <AnimatePresence>
           {node.children.map((child) => (
-            <TreeNodeRow key={child.path} node={child} depth={depth + 1} onOpen={onOpen} />
+            <TreeNodeRow
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              onOpen={onOpen}
+              onCreateInFolder={onCreateInFolder}
+              draggingPathRef={draggingPathRef}
+              dragOverFolder={dragOverFolder}
+              onDragOverFolder={onDragOverFolder}
+              onDropInFolder={onDropInFolder}
+              creatingInFolder={creatingInFolder}
+              onCancelCreateInFolder={onCancelCreateInFolder}
+              onCommitCreateInFolder={onCommitCreateInFolder}
+            />
           ))}
+          {/* Inline new-file prompt shown inside this folder */}
+          {creatingInFolder === node.path && (
+            <div
+              className="flex items-center gap-1.5 py-0.5"
+              style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }}
+            >
+              <File className="w-3.5 h-3.5 shrink-0 text-vertra-text-dim/60" />
+              <RenameInput
+                initialValue="untitled.ts"
+                onCommit={(name) => onCommitCreateInFolder(node.path, name)}
+                onCancel={onCancelCreateInFolder}
+              />
+            </div>
+          )}
         </AnimatePresence>
       )}
     </>
   );
 }
 
+// ─── Unique path helper ──────────────────────────────────────────────────────
+// Inserts "(N)" between the stem and extension until the path is free.
+// Works for both files (stem.ext) and folders (no extension).
+// Checks existence as a direct file key AND as a folder prefix in vfsFiles.
+
+function makeUniquePath(
+  destPath: string,
+  vfsFiles: Record<string, unknown>,
+): string {
+  const isUsed = (p: string) =>
+    p in vfsFiles || Object.keys(vfsFiles).some((k) => k.startsWith(p + '/'));
+
+  if (!isUsed(destPath)) return destPath;
+
+  const lastSlash = destPath.lastIndexOf('/');
+  const dir = lastSlash >= 0 ? destPath.slice(0, lastSlash + 1) : '';
+  const basename = lastSlash >= 0 ? destPath.slice(lastSlash + 1) : destPath;
+
+  const dotIdx = basename.lastIndexOf('.');
+  const stem = dotIdx > 0 ? basename.slice(0, dotIdx) : basename;
+  const ext = dotIdx > 0 ? basename.slice(dotIdx) : '';
+
+  let n = 1;
+  while (isUsed(`${dir}${stem}(${n})${ext}`)) n++;
+  return `${dir}${stem}(${n})${ext}`;
+}
+
 // ─── New entry prompt ─────────────────────────────────────────────────────────
 
 function NewEntryPrompt({
   type,
+  defaultName,
   onCommit,
   onCancel,
 }: {
   type: 'file' | 'folder';
+  defaultName: string;
   onCommit: (name: string) => void;
   onCancel: () => void;
 }) {
-  const [value, setValue] = useState(type === 'file' ? 'untitled.js' : 'folder');
+  const [value, setValue] = useState(defaultName);
   return (
     <div className="flex items-center gap-1.5 px-3 py-1">
       {type === 'file' ? (
@@ -224,7 +336,7 @@ function NewEntryPrompt({
         }}
         className="flex-1 min-w-0 px-1 text-xs bg-vertra-surface border border-vertra-cyan/50 rounded text-vertra-text outline-none"
       />
-      <button onClick={onCancel} className="text-vertra-text-dim hover:text-vertra-text">
+      <button onClick={onCancel} className="text-vertra-text-dim hover:text-vertra-text cursor-pointer">
         <X className="w-3 h-3" />
       </button>
     </div>
@@ -234,35 +346,51 @@ function NewEntryPrompt({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ScriptWorkspace() {
-  const { vfs, createFile, openScript } = useScriptStore();
+  const { vfs, createFile, openScript, renameEntry } = useScriptStore();
   const { toggleSidebar } = useUIStore();
   const [creating, setCreating] = useState<'file' | 'folder' | null>(null);
+  const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);
+  const draggingPathRef = useRef<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
+  const ext = '.ts';
   const tree = buildTree(vfs);
   const hasEntries = Object.keys(vfs.files).length > 0;
 
-  /** Resolve a collision-free root-level path. */
-  const uniqueRootPath = (base: string): string => {
-    if (!vfs.files[base] && !Object.keys(vfs.files).some((k) => k === base)) return base;
-    let n = 1;
-    while (vfs.files[`${base} ${n}`] || Object.keys(vfs.files).some((k) => k === `${base} ${n}`)) n++;
-    return `${base} ${n}`;
-  };
-
   const handleCommitNew = (name: string) => {
     if (creating === 'file') {
-      const path = uniqueRootPath(name);
-      createFile(path);
+      const path = makeUniquePath(name, vfs.files);
+      createFile(path, getDefaultScriptTabs());
       openScript(path);
     }
-    // Folders are implicit (prefix of file paths) — just create a placeholder file inside.
     if (creating === 'folder') {
-      const folder = uniqueRootPath(name);
-      const filePath = `${folder}/untitled.js`;
-      createFile(filePath);
+      const folder = makeUniquePath(name, vfs.files);
+      const filePath = makeUniquePath(`${folder}/untitled${ext}`, vfs.files);
+      createFile(filePath, getDefaultScriptTabs());
       openScript(filePath);
     }
     setCreating(null);
+  };
+
+  const handleCreateInFolder = (folderPath: string) => {
+    setCreatingInFolder(folderPath);
+  };
+
+  const handleCommitCreateInFolder = (folderPath: string, name: string) => {
+    const filePath = makeUniquePath(`${folderPath}/${name}`, vfs.files);
+    createFile(filePath, getDefaultScriptTabs());
+    openScript(filePath);
+    setCreatingInFolder(null);
+  };
+
+  const handleDropInFolder = (folderPath: string) => {
+    const src = draggingPathRef.current;
+    if (!src) return;
+    // Prevent dropping a folder into itself or one of its own descendants
+    if (folderPath === src || folderPath.startsWith(src + '/')) return;
+    const name = src.includes('/') ? src.slice(src.lastIndexOf('/') + 1) : src;
+    const dest = makeUniquePath(`${folderPath}/${name}`, vfs.files);
+    if (src !== dest) renameEntry(src, dest);
   };
 
   return (
@@ -299,6 +427,7 @@ export default function ScriptWorkspace() {
         {creating && (
           <NewEntryPrompt
             type={creating}
+            defaultName={creating === 'file' ? `untitled${ext}` : 'folder'}
             onCommit={handleCommitNew}
             onCancel={() => setCreating(null)}
           />
@@ -320,9 +449,18 @@ export default function ScriptWorkspace() {
             node={node}
             depth={0}
             onOpen={(path) => openScript(path)}
+            onCreateInFolder={handleCreateInFolder}
+            draggingPathRef={draggingPathRef}
+            dragOverFolder={dragOverFolder}
+            onDragOverFolder={setDragOverFolder}
+            onDropInFolder={handleDropInFolder}
+            creatingInFolder={creatingInFolder}
+            onCancelCreateInFolder={() => setCreatingInFolder(null)}
+            onCommitCreateInFolder={handleCommitCreateInFolder}
           />
         ))}
       </div>
     </div>
   );
 }
+

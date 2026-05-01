@@ -60,6 +60,8 @@ pub fn create_router(state: AppState) -> Router {
                 .get(scripts::download_scripts)
                 .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
         )
+        // Public (no-auth) script VFS download — by share token
+        .route("/api/scripts/s/:token", get(scripts::download_public_scripts))
         // Texture endpoints
         .route(
             "/textures/upload",

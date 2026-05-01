@@ -8,12 +8,14 @@ export interface ScriptFile {
 /**
  * Virtual File System for a project's scripts.
  *
- * Keys are slash-separated paths (e.g. "player/controller.js").
+ * Keys are slash-separated paths (e.g. "player/controller.ts").
  * The entire VFS is serialised to a single JSON blob and stored at
  * `scripts/{project_id}.json` in R2.
  */
 export interface ScriptVfs {
   files: Record<string, ScriptFile>;
+  /** Maps engine object IDs to the script file currently bound to that object. */
+  bindings: Record<string, string>;
 }
 
-export const EMPTY_VFS: ScriptVfs = { files: {} };
+export const EMPTY_VFS: ScriptVfs = { files: {}, bindings: {} };

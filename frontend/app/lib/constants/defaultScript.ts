@@ -8,9 +8,8 @@
  *   { initialState, onStartup?, onUpdate?, onEvent? }
  */
 export const DEFAULT_ENGINE_SCRIPT = `// Vertra Engine Script
-// Globals available: VertraObject, Geometry, Transform, Camera
-//
-// Return an object with your handlers below.
+// Scene, FrameContext, Camera, World, VertraObject, Geometry, and Transform
+// types are provided automatically from the selected engine version.
 
 return {
   // Mutable state passed to every callback — put your game state here.
@@ -19,9 +18,9 @@ return {
     angle: 0,
   },
 
-  onStartup(state, scene) { },
+  onStartup(state, scene: Scene, _ctx: FrameContext): void { },
 
-  onUpdate(state, scene, ctx) {
+  onUpdate(state, scene: Scene, ctx: FrameContext): void {
     // Camera movement with WASD / arrow keys
     scene.camera.handle_input_default(
       Array.from(state.pressedKeys),
@@ -30,7 +29,7 @@ return {
     );
   },
 
-  onEvent(state, scene, event) {
+  onEvent(state, scene: Scene, event): void {
     if (event.type === "keydown") state.pressedKeys.add(event.data.code);
     if (event.type === "keyup")   state.pressedKeys.delete(event.data.code);
     if (event.type === "mousemotion") {
@@ -39,3 +38,7 @@ return {
   },
 };
 `;
+
+export function getDefaultEngineScript(): string {
+  return DEFAULT_ENGINE_SCRIPT;
+}

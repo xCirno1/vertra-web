@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/uiStore';
 import dynamic from 'next/dynamic';
+import type { EngineVersion } from '@/lib/engine/engineCapabilities';
 
 const ScriptEditor = dynamic(
   () => import('./ScriptEditor'),
@@ -19,6 +20,7 @@ interface BottomPanelProps {
   isLoadingAssets?: boolean;
   script: string;
   onScriptChange: (v: string) => void;
+  engineVersion: EngineVersion;
 }
 
 const ASSET_PLACEHOLDERS = [
@@ -32,6 +34,7 @@ export default function BottomPanel({
   isLoadingAssets = false,
   script,
   onScriptChange,
+  engineVersion,
 }: BottomPanelProps) {
   const latestLogs = logs.slice(-30).reverse();
   const { toggleBottomPanel } = useUIStore();
@@ -88,7 +91,7 @@ export default function BottomPanel({
         </div>
 
         {/* Content area */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-visible">
           <TabsContent value="assets" className="mt-0 h-full overflow-y-auto p-4">
             <motion.div
               initial={{ opacity: 0, y: 6 }}
@@ -139,8 +142,12 @@ export default function BottomPanel({
             </motion.div>
           </TabsContent>
 
-          <TabsContent value="script" className="mt-0 h-full overflow-hidden">
-            <ScriptEditor value={script} onChange={onScriptChange} />
+          <TabsContent value="script" className="mt-0 h-full min-h-0 overflow-visible">
+            <ScriptEditor
+              value={script}
+              onChange={onScriptChange}
+              engineVersion={engineVersion}
+            />
           </TabsContent>
         </div>
       </Tabs>
