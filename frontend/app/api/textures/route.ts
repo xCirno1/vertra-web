@@ -23,9 +23,15 @@ export async function GET(req: NextRequest) {
   if (projectId) backendUrl.searchParams.set('project_id', projectId);
   if (includePublic) backendUrl.searchParams.set('include_public', includePublic);
 
-  const backendRes = await fetch(backendUrl.toString(), {
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(backendUrl.toString(), {
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[textures] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const body: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(body, { status: backendRes.status });

@@ -23,7 +23,13 @@ export async function GET(
     ...authHeader(request),
   };
 
-  const res = await fetch(`${API_BASE}/projects/${id}`, { headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/projects/${id}`, { headers });
+  } catch (err) {
+    console.error('[projects/id/script] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   if (!res.ok) {
     return NextResponse.json(
@@ -66,11 +72,17 @@ export async function PATCH(
     );
   }
 
-  const res = await fetch(`${API_BASE}/projects/${id}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ script: body.script }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/projects/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ script: body.script }),
+    });
+  } catch (err) {
+    console.error('[projects/id/script] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   if (!res.ok) {
     return NextResponse.json(

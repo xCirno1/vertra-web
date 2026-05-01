@@ -19,9 +19,15 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const backendRes = await fetch(`${BACKEND_URL}/textures/${id}/url`, {
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/textures/${id}/url`, {
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[textures/id] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const body: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(body, { status: backendRes.status });
@@ -38,11 +44,17 @@ export async function PATCH(
   const { id } = await params;
   const body: unknown = await req.json().catch(() => ({}));
 
-  const backendRes = await fetch(`${BACKEND_URL}/textures/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-    body: JSON.stringify(body),
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/textures/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error('[textures/id] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const resBody: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(resBody, { status: backendRes.status });
@@ -58,10 +70,16 @@ export async function DELETE(
 ) {
   const { id } = await params;
 
-  const backendRes = await fetch(`${BACKEND_URL}/textures/${id}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...authHeader(req) },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(`${BACKEND_URL}/textures/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...authHeader(req) },
+    });
+  } catch (err) {
+    console.error('[textures/id] Backend unreachable:', err);
+    return NextResponse.json({ error: 'Backend service unavailable' }, { status: 502 });
+  }
 
   const body: unknown = await backendRes.json().catch(() => null);
   return NextResponse.json(body, { status: backendRes.status });
