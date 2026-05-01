@@ -576,21 +576,19 @@ export default function EditorPage() {
             <div className="flex shrink-0 border-b border-vertra-border/40 bg-vertra-surface/60">
               <button
                 onClick={() => setLeftPanelTab('scene')}
-                className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${
-                  leftPanelTab === 'scene'
+                className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${leftPanelTab === 'scene'
                     ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
                     : 'text-vertra-text-dim hover:text-vertra-text'
-                }`}
+                  }`}
               >
                 Scene
               </button>
               <button
                 onClick={() => setLeftPanelTab('scripts')}
-                className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${
-                  leftPanelTab === 'scripts'
+                className={`flex-1 py-1.5 text-[11px] font-medium transition-colors ${leftPanelTab === 'scripts'
                     ? 'text-vertra-cyan border-b-2 border-vertra-cyan -mb-px'
                     : 'text-vertra-text-dim hover:text-vertra-text'
-                }`}
+                  }`}
               >
                 Scripts
               </button>
