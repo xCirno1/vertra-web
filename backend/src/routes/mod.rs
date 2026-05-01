@@ -5,6 +5,7 @@ use crate::state::AppState;
 
 pub mod auth;
 pub mod projects;
+pub mod scripts;
 pub mod textures;
 pub mod vtr;
 
@@ -40,6 +41,13 @@ pub fn create_router(state: AppState) -> Router {
         )
         // Public (no-auth) VTR download — by share token
         .route("/api/vtr/s/:token", get(vtr::download_public_vtr))
+        // Script VFS endpoints (Cloudflare R2)
+        .route(
+            "/api/scripts/:project_id",
+            axum::routing::put(scripts::upload_scripts)
+                .get(scripts::download_scripts)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         // Texture endpoints
         .route(
             "/textures/upload",

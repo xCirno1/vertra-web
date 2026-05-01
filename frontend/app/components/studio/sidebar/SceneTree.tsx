@@ -16,9 +16,11 @@ const ENGINE_ROOT_ID = 'engine-world-root';
 interface SceneTreeProps {
   onDeleteEntity?: (engineId: number) => void;
   onReparentEntity?: (engineId: number, newParentEngineId: number | null) => void;
+  /** Called when the user clicks an engine object in the tree, with its integer ID. */
+  onSelectEntity?: (engineId: number) => void;
 }
 
-export default function SceneTree({ onDeleteEntity, onReparentEntity }: SceneTreeProps) {
+export default function SceneTree({ onDeleteEntity, onReparentEntity, onSelectEntity }: SceneTreeProps) {
   const { scene, selectedEntityId, selectEntity, reparentEntity } = useSceneStore();
   const { toggleSidebar } = useUIStore();
   const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null);
@@ -85,7 +87,13 @@ export default function SceneTree({ onDeleteEntity, onReparentEntity }: SceneTre
           whileHover={{ x: 4 }}
         >
           <div
-            onClick={() => selectEntity(entityId)}
+            onClick={() => {
+              selectEntity(entityId);
+              if (onSelectEntity && entityId !== ENGINE_ROOT_ID) {
+                const engineId = parseInt(entityId, 10);
+                if (!isNaN(engineId)) onSelectEntity(engineId);
+              }
+            }}
             draggable={entityId !== scene.root.id}
             onDragStart={(event: DragEvent<HTMLDivElement>) => {
               setDraggedEntityId(entityId);

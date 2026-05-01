@@ -1,8 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import init, { VertraObject, Geometry, Transform, Camera } from '../../public/engine/vertra_binder.js';
-import type { WebWindow, Scene, FrameContext, InspectorData, EditorEventPayload } from '../../public/engine/vertra_binder.js';
+import type {
+  WebWindow,
+  Scene,
+  FrameContext,
+  InspectorData,
+  EditorEventPayload,
+  JsScript,
+} from '../../public/engine/v0.3.0a1/vertra_js.js';
+import type { EngineVersion } from '@/lib/engine/engineCapabilities';
+import { resolveEngineModulePath, getCapabilities } from '@/lib/engine/engineCapabilities';
+import { resolveEngineVersion } from '@/lib/storage/engine-version-storage';
 import { useSceneStore } from '@/stores/sceneStore';
 import { loadTextureRgba } from '@/lib/storage/texture-cache';
 import type { Entity as SceneEntity, Scene as ReactScene } from '@/types/scene';
@@ -25,13 +34,21 @@ interface UseVertraEngineReturn {
   engineError: string | null;
   engineMode: 'editor' | 'play' | null;
   engineSelectedObject: InspectorData | undefined;
+  /** The texture_path of the currently selected engine object, or undefined if none. */
+  selectedObjectTexturePath: string | undefined;
   autosaveState: AutosaveState;
+  activeEngineVersion: EngineVersion;
   play: (script: string, initialVtrBytes?: Uint8Array) => Promise<void>;
   stop: () => void;
   saveSceneVtr: () => Promise<Uint8Array>;
   loadSceneVtr: (bytes: Uint8Array) => void;
   toggleEditorMode: () => void;
   sendEditorEvent: (payload: EditorEventPayload) => void;
+  /**
+   * Programmatically select an object in the engine by its integer ID.
+   * Triggers the selection_changed editor event, updating the inspector.
+   */
+  selectEngineObject: (id: number) => void;
   applyTransformToEngine: (
     id: number,
     position: [number, number, number],
@@ -47,6 +64,8 @@ interface UseVertraEngineReturn {
   spawnGeometry: (type: GeometryType, name?: string) => number | null;
   deleteEngineObject: (id: number) => void;
   reparentEngineObject: (id: number, newParentId: number | null) => void;
+  attachScript: (id: number, scriptBody: string) => void;
+  detachScript: (id: number) => void;
 }
 
 // Shape of the object the user script must return.
@@ -71,15 +90,14 @@ type EditorStateEvent =
   | { type: string;[key: string]: unknown };
 
 /** Execute user script in a sandboxed function with engine globals injected. */
-function executeUserScript(scriptBody: string): UserScriptHandlers {
-  const factory = new Function(
-    'VertraObject',
-    'Geometry',
-    'Transform',
-    'Camera',
-    scriptBody,
-  );
-  return factory(VertraObject, Geometry, Transform, Camera) as UserScriptHandlers;
+function executeUserScript(
+  scriptBody: string,
+  globals: Record<string, unknown>,
+): UserScriptHandlers {
+  const keys = Object.keys(globals);
+  const values = Object.values(globals);
+  const factory = new Function(...keys, scriptBody);
+  return factory(...values) as UserScriptHandlers;
 }
 
 // ─── Engine → React scene sync ────────────────────────────────────────────────
@@ -166,6 +184,43 @@ function buildReactSceneFromWorld(engineScene: Scene): ReactScene {
   };
 }
 
+/**
+ * Re-upload texture pixel data for every object in the scene that has a
+ * `texture_path` set.  Called after `load_vtr` because the VTR format only
+ * persists the texture key strings, not the raw GPU pixel data — so each
+ * session restart must re-upload the decoded RGBA bytes from the cache.
+ */
+async function restoreTexturesFromVtr(scene: Scene): Promise<void> {
+  const visited = new Set<number>();
+  const textureIds = new Set<string>();
+
+  function collectTextures(id: number): void {
+    if (visited.has(id)) return;
+    visited.add(id);
+    const obj = scene.world.get_object(id);
+    if (!obj) return;
+    const tp = obj.texture_path;
+    if (tp) textureIds.add(tp);
+    for (const childId of obj.children) {
+      collectTextures(childId);
+    }
+  }
+
+  for (const rootId of scene.world.get_roots()) {
+    collectTextures(rootId);
+  }
+
+  for (const textureId of textureIds) {
+    if (scene.has_texture(textureId)) continue;
+    try {
+      const rgba = await loadTextureRgba(textureId);
+      scene.load_texture_from_rgba(textureId, rgba.width, rgba.height, rgba.data);
+    } catch (err) {
+      console.error('[Vertra] Failed to restore texture after VTR load:', textureId, err);
+    }
+  }
+}
+
 /** Empty React scene shown when no engine is running. */
 function createEmptyReactScene(): ReactScene {
   const root: SceneEntity = {
@@ -201,6 +256,8 @@ interface UseVertraEngineOptions {
   onAutosaveSuccess?: () => void;
   /** Called when an autosave upload fails. */
   onAutosaveError?: (reason: string) => void;
+  /** Engine version override for this project. */
+  engineVersion?: EngineVersion;
 }
 
 export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertraEngineReturn {
@@ -208,10 +265,15 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
   const [engineError, setEngineError] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<'editor' | 'play' | null>(null);
   const [engineSelectedObject, setEngineSelectedObject] = useState<InspectorData | undefined>(undefined);
+  const [selectedObjectTexturePath, setSelectedObjectTexturePath] = useState<string | undefined>(undefined);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
+  const [activeEngineVersion, setActiveEngineVersion] = useState<EngineVersion>(() => resolveEngineVersion(options.engineVersion));
 
   const engineRef = useRef<WebWindow | null>(null);
   const sceneRef = useRef<Scene | null>(null);
+  const jsScriptClassRef = useRef<(new (options: unknown) => JsScript) | null>(null);
+  const vertraObjectClassRef = useRef<any>(null);
+  const geometryClassRef = useRef<any>(null);
   const vtrBridge = useRef<VtrBridge>({ saveCallback: null, loadData: null });
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -274,12 +336,41 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     setEngineError(null);
 
     try {
-      await init();
+      const version = resolveEngineVersion(optionsRef.current.engineVersion);
+      const modulePath = resolveEngineModulePath(version);
+      const capabilities = getCapabilities(version);
+
+      // Dynamic import — engine files served from public/engine/
+      const engineModule = await import(/* webpackIgnore: true */ modulePath) as any;
+      await engineModule.default(); // init wasm
+
+      const { VertraObject, Geometry, Transform, Camera } = engineModule as {
+        VertraObject: typeof import('../../public/engine/v0.3.0a1/vertra_js.js').VertraObject;
+        Geometry: typeof import('../../public/engine/v0.3.0a1/vertra_js.js').Geometry;
+        Transform: typeof import('../../public/engine/v0.3.0a1/vertra_js.js').Transform;
+        Camera: typeof import('../../public/engine/v0.3.0a1/vertra_js.js').Camera;
+      };
+
+      jsScriptClassRef.current = capabilities.perObjectScripting
+        ? (engineModule.JsScript as new (options: unknown) => JsScript)
+        : null;
+      vertraObjectClassRef.current = engineModule.VertraObject;
+      geometryClassRef.current = engineModule.Geometry;
+
+      setActiveEngineVersion(version);
 
       // Parse user script — throws a visible error if malformed.
       let handlers: UserScriptHandlers;
       try {
-        handlers = executeUserScript(script);
+        handlers = executeUserScript(script, {
+          VertraObject,
+          Geometry,
+          Transform,
+          Camera,
+          ...(capabilities.perObjectScripting && engineModule.JsScript
+            ? { JsScript: engineModule.JsScript }
+            : {}),
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`Script error: ${msg}`);
@@ -287,14 +378,8 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
 
       const { initialState, onStartup, onUpdate, onEvent } = handlers;
 
-      const win = new (
-        (await import('../../public/engine/vertra_binder.js')).WebWindow
-      )(
-        new Camera({
-          position: [0.0, 8.0, -12.0],
-          lr_rot: 90.0,
-          ud_rot: -30,
-        }),
+      const win = new (engineModule.WebWindow as typeof import('../../public/engine/v0.3.0a1/vertra_js.js').WebWindow)(
+        new Camera({ position: [0.0, 8.0, -12.0], lr_rot: 90.0, ud_rot: -30 }),
         initialState,
       ) as WebWindow;
 
@@ -318,6 +403,11 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
           } catch (err) {
             console.error('[Vertra] on_startup load_vtr error:', err);
           }
+          // Re-upload GPU texture data for all objects restored from the VTR
+          // snapshot. The VTR format stores texture_path keys on objects but
+          // not the pixel data — so after every page refresh we must reload
+          // the decoded RGBA bytes from the cache and re-upload them.
+          void restoreTexturesFromVtr(scene);
         }
         scene.world.on_scene_graph_modified((_event: unknown) => {
           const scene = sceneRef.current;
@@ -349,8 +439,14 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
         if (!eventType) return;
 
         if (eventType === 'selection_changed' || eventType === 'SelectionChanged') {
-          const inspectorData = sceneRef.current?.editor.inspector() as InspectorData | undefined;
+          const scene = sceneRef.current;
+          const inspectorData = scene?.editor.inspector() as InspectorData | undefined;
           setEngineSelectedObject(inspectorData);
+          if (inspectorData && scene) {
+            setSelectedObjectTexturePath(scene.world.get_object(inspectorData.id)?.texture_path);
+          } else {
+            setSelectedObjectTexturePath(undefined);
+          }
           return;
         }
 
@@ -428,8 +524,12 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     }
     setAutosaveState('idle');
     sceneRef.current = null;
+    jsScriptClassRef.current = null;
+    vertraObjectClassRef.current = null;
+    geometryClassRef.current = null;
     setEngineMode(null);
     setEngineSelectedObject(undefined);
+    setSelectedObjectTexturePath(undefined);
     useSceneStore.getState().setScene(createEmptyReactScene());
     if (engineRef.current) {
       try {
@@ -487,6 +587,22 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
   /** Forward an input event to the editor subsystem. No-op when engine is not running. */
   const sendEditorEvent = useCallback((payload: EditorEventPayload): void => {
     sceneRef.current?.editor.editor_event(payload);
+  }, []);
+
+  /**
+   * Programmatically select an object in the engine by its integer ID.
+   * Calls `editor.set_multi_selected` which triggers the selection_changed
+   * editor event, causing the inspector and texture path to update.
+   */
+  const selectEngineObject = useCallback((id: number): void => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.editor.set_multi_selected(new Uint32Array([id]));
+    // Immediately sync inspector state — the editor event fires asynchronously
+    // from the WASM loop, so we read back eagerly here for instant UI feedback.
+    const inspectorData = scene.editor.inspector() as InspectorData | undefined;
+    setEngineSelectedObject(inspectorData);
+    setSelectedObjectTexturePath(scene.world.get_object(id)?.texture_path);
   }, []);
 
   /**
@@ -592,16 +708,20 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     const scene = sceneRef.current;
     if (!scene) return null;
 
-    const displayName = name ?? (type.charAt(0).toUpperCase() + type.slice(1));
-    const obj = new VertraObject(displayName);
+    const VertraObjectClass = vertraObjectClassRef.current;
+    const GeometryClass = geometryClassRef.current;
+    if (!VertraObjectClass || !GeometryClass) return null;
 
-    let geo: Geometry;
+    const displayName = name ?? (type.charAt(0).toUpperCase() + type.slice(1));
+    const obj = new VertraObjectClass(displayName) as import('../../public/engine/v0.3.0a1/vertra_js.js').VertraObject;
+
+    let geo: any;
     switch (type) {
-      case 'cube': geo = Geometry.cube(1); break;
-      case 'sphere': geo = Geometry.sphere(0.5, 30); break;
-      case 'plane': geo = Geometry.plane(2); break;
-      case 'box': geo = Geometry.box(1, 1, 1); break;
-      case 'pyramid': geo = Geometry.pyramid(1, 1.5); break;
+      case 'cube': geo = GeometryClass.cube(1); break;
+      case 'sphere': geo = GeometryClass.sphere(0.5, 30); break;
+      case 'plane': geo = GeometryClass.plane(2); break;
+      case 'box': geo = GeometryClass.box(1, 1, 1); break;
+      case 'pyramid': geo = GeometryClass.pyramid(1, 1.5); break;
     }
 
     obj.set_geometry(geo);
@@ -629,13 +749,35 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     triggerVtrAutosave();
   }, [triggerVtrAutosave]);
 
+  const attachScript = useCallback((id: number, scriptBody: string): void => {
+    const scene = sceneRef.current;
+    const JsScriptClass = jsScriptClassRef.current;
+    if (!scene || !JsScriptClass) return;
+    try {
+      const factory = new Function('JsScript', scriptBody);
+      const script = factory(JsScriptClass) as JsScript;
+      (scene as unknown as { attach_script: (id: number, script: JsScript) => void }).attach_script(id, script);
+    } catch (err) {
+      console.error('[Vertra] attachScript compile error:', err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const detachScript = useCallback((id: number): void => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    (scene as unknown as { detach_script: (id: number) => boolean }).detach_script(id);
+  }, []);
+
   return {
     engineState,
     engineError,
     engineMode,
     engineSelectedObject,
+    selectedObjectTexturePath,
     autosaveState,
+    activeEngineVersion,
     play,
+    selectEngineObject,
     stop,
     saveSceneVtr,
     loadSceneVtr,
@@ -647,6 +789,8 @@ export function useVertraEngine(options: UseVertraEngineOptions = {}): UseVertra
     spawnGeometry,
     deleteEngineObject,
     reparentEngineObject,
+    attachScript,
+    detachScript,
   };
 }
 

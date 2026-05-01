@@ -1,5 +1,6 @@
 import { Project } from '@/types/scene';
 import { createEmptyScene } from '@/lib/scene/scene-factory';
+import type { EngineVersion } from '@/lib/engine/engineCapabilities';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ export type ProjectSource = 'local' | 'cloud';
 
 export interface ProjectSettings {
   autosaveEnabled: boolean;
+  engineVersion?: EngineVersion;
 }
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
